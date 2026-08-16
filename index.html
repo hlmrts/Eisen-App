@@ -47,6 +47,21 @@
   .day-nav button.arrow:not(:disabled):active{ color:var(--text); }
   .date-label-btn{ background:none; border:none; font-size:12.5px; color:var(--text-dim); text-transform:capitalize; padding:4px 6px; font-family:'Inter',sans-serif; }
   .date-label-btn:active{ color:var(--text); }
+  .gear-btn{ background:none; border:none; color:var(--text-dim); padding:6px; display:flex; flex-shrink:0; }
+  .gear-btn svg{ width:20px; height:20px; }
+  .gear-btn:active{ color:var(--text); transform:scale(0.94); }
+
+  .settings-overlay{ position:fixed; inset:0; background:rgba(10,11,13,0.72); backdrop-filter:blur(4px); display:none; align-items:center; justify-content:center; z-index:110; padding:24px; }
+  .settings-overlay.open{ display:flex; }
+  .settings-card{ background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:22px; width:100%; max-width:380px; max-height:86vh; overflow-y:auto; }
+  .settings-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .settings-head h3{ margin:0; font-size:16px; font-weight:700; }
+  .settings-close{ background:none; border:none; color:var(--text-faint); font-size:24px; line-height:1; padding:2px 6px; }
+  .settings-section{ margin-bottom:20px; }
+  .settings-section:last-child{ margin-bottom:0; }
+  .settings-section h4{ margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); font-weight:600; }
+  .settings-section p{ margin:0 0 12px; font-size:12.5px; color:var(--text-faint); line-height:1.5; }
+  .settings-status{ font-size:12px; color:var(--teal); font-weight:600; margin-top:8px; min-height:16px; }
 
   main{ flex:1; padding: 4px 18px 104px 18px; }
   .view{ display:none; animation: fade .25s ease; }
@@ -212,6 +227,9 @@
       <button type="button" class="date-label-btn" id="todayLabel"></button>
       <button type="button" class="arrow" id="nextDayBtn" aria-label="Nächster Tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
     </div>
+    <button type="button" class="gear-btn" id="settingsBtn" aria-label="Einstellungen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </button>
   </header>
 
   <main>
@@ -427,6 +445,36 @@
         <button type="button" class="cal-today-btn" id="calTodayBtn">Heute</button>
         <button type="button" class="cal-close-btn" id="calCloseBtn">Schließen</button>
       </div>
+    </div>
+  </div>
+
+  <div class="settings-overlay" id="settingsOverlay">
+    <div class="settings-card">
+      <div class="settings-head">
+        <h3>Einstellungen</h3>
+        <button type="button" class="settings-close" id="settingsCloseBtn" aria-label="Schließen">×</button>
+      </div>
+
+      <div class="settings-section">
+        <h4>Backup erstellen</h4>
+        <p>Speichert alle deine Daten (Check-ins, Training, Journal, Ernährung, Pläne) als Datei — zum Sichern oder um sie auf ein neues Gerät zu übertragen.</p>
+        <button type="button" class="btn" id="exportBtn">Backup exportieren</button>
+      </div>
+
+      <div class="settings-section">
+        <h4>Backup wiederherstellen</h4>
+        <p>Ersetzt alle aktuellen Daten in EISEN durch den Inhalt der ausgewählten Backup-Datei. Das kann nicht rückgängig gemacht werden.</p>
+        <button type="button" class="btn ghost" id="importBtn">Backup importieren</button>
+        <input type="file" id="importFile" accept=".json,application/json" style="display:none;">
+      </div>
+
+      <div class="settings-section">
+        <h4>Alles zurücksetzen</h4>
+        <p>Löscht sämtliche Daten unwiderruflich und setzt EISEN auf den Ausgangszustand zurück.</p>
+        <button type="button" class="btn danger-ghost" id="resetBtn">Alle Daten löschen</button>
+      </div>
+
+      <div class="settings-status" id="settingsStatus"></div>
     </div>
   </div>
 
@@ -646,6 +694,72 @@ document.getElementById('calMonthNext').addEventListener('click', ()=>{ calMonth
 document.getElementById('calYearPrev').addEventListener('click', ()=>{ calYear--; renderCalGrid(); });
 document.getElementById('calYearNext').addEventListener('click', ()=>{ if(calYear<parseInt(todayStr().slice(0,4))) calYear++; else return; renderCalGrid(); });
 updateDateLabel();
+
+/* ---------------- settings: backup export / import / reset ---------------- */
+function openSettings(){ document.getElementById('settingsStatus').textContent=''; document.getElementById('settingsOverlay').classList.add('open'); }
+function closeSettings(){ document.getElementById('settingsOverlay').classList.remove('open'); }
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
+document.getElementById('settingsOverlay').addEventListener('click', (e)=>{ if(e.target.id==='settingsOverlay') closeSettings(); });
+
+function reRenderEverything(){
+  viewingDate = todayStr();
+  updateDateLabel();
+  renderHome();
+  renderTraining();
+  renderJournalView();
+  renderTrends();
+  renderErnaehrung();
+}
+
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  try{
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'eisen-backup-' + todayStr() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    document.getElementById('settingsStatus').textContent = 'Backup wurde heruntergeladen ✓';
+  }catch(e){
+    console.error('Export fehlgeschlagen', e);
+    document.getElementById('settingsStatus').textContent = 'Export fehlgeschlagen.';
+  }
+});
+
+document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('importFile').click());
+document.getElementById('importFile').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(reader.result);
+      if(!confirm('Alle aktuellen Daten in EISEN durch dieses Backup ersetzen? Das kann nicht rückgängig gemacht werden.')) { e.target.value=''; return; }
+      state = migrate(parsed);
+      saveState();
+      reRenderEverything();
+      document.getElementById('settingsStatus').textContent = 'Backup wurde importiert ✓';
+    }catch(err){
+      console.error('Import fehlgeschlagen', err);
+      document.getElementById('settingsStatus').textContent = 'Import fehlgeschlagen — ist das eine gültige EISEN-Backup-Datei?';
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  if(!confirm('Wirklich ALLE Daten löschen (Check-ins, Training, Journal, Ernährung, Pläne)? Das kann nicht rückgängig gemacht werden.')) return;
+  localStorage.removeItem(STORE_KEY);
+  state = defaultState();
+  saveState();
+  reRenderEverything();
+  closeSettings();
+});
 
 /* ---------------- daily motivational quote ---------------- */
 const QUOTES = [
