@@ -601,7 +601,7 @@
         <div id="photoGallery" style="display:flex; gap:10px; overflow-x:auto; padding-bottom:4px;"></div>
         <div class="empty" id="photoEmpty" style="display:none;">Noch keine Fotos.</div>
         <input type="file" id="photoInput" accept="image/*" style="display:none;">
-        <button type="button" class="add-food-btn" id="addPhotoBtn" style="margin-top:12px; margin-bottom:0;">+ Foto hinzufügen</button>
+        <button type="button" class="add-food-btn" id="addPhotoBtn" data-label-on="+ Foto hinzufügen" style="margin-top:12px; margin-bottom:0;">+ Foto hinzufügen</button>
       </div>
       <div class="card">
         <h2>Behavior-Auswertung <span class="hint">Recovery mit vs. ohne</span></h2>
@@ -685,7 +685,7 @@
           <label class="field"><div class="field-head"><span>Name</span></div><input type="text" id="foodNameInput" placeholder="z. B. Haferflocken mit Beeren"></label>
 
           <input type="file" id="foodPhotoInput" accept="image/*" style="display:none;">
-          <button type="button" class="add-food-btn" id="foodPhotoBtn" style="margin-top:0;">+ Foto vom Essen</button>
+          <button type="button" class="add-food-btn" id="foodPhotoBtn" data-label-on="+ Foto vom Essen" style="margin-top:0;">+ Foto vom Essen</button>
           <div id="foodPhotoPreviewWrap" style="display:none; margin-bottom:14px;">
             <img id="foodPhotoPreview" style="width:100%; max-height:180px; object-fit:cover; border-radius:12px; display:block;">
             <div id="foodClassifyStatus" class="empty" style="padding:10px 0 0;"></div>
@@ -797,6 +797,15 @@
         <p>Ersetzt alle aktuellen Daten in EISEN durch den Inhalt der ausgewählten Backup-Datei. Das kann nicht rückgängig gemacht werden.</p>
         <button type="button" class="btn ghost" id="importBtn">Backup importieren</button>
         <input type="file" id="importFile" accept=".json,application/json" style="display:none;">
+      </div>
+
+      <div class="settings-section">
+        <h4>Fotos speichern</h4>
+        <p>Steuert, ob EISEN Fortschritts- und Essensfotos überhaupt speichern darf. Fotos liegen ausschließlich lokal auf diesem Gerät (IndexedDB) — nie in einer Cloud, nie auf einem Server, keine Kosten. Bei "Aus" bleiben bereits gespeicherte Fotos erhalten, es können nur keine neuen hinzugefügt werden.</p>
+        <div class="split-toggle" style="margin-bottom:0;">
+          <button type="button" id="photosOnBtn" class="active">An</button>
+          <button type="button" id="photosOffBtn">Aus</button>
+        </div>
       </div>
 
       <div class="settings-section">
@@ -915,6 +924,69 @@ function ensureClassifierLibs(){
     .catch(()=>{});
 }
 
+/* ---------------- photo storage (IndexedDB) ----------------
+   Photos are large and grow fast, so they never touch the small
+   localStorage JSON state — only a photo id is kept there. The actual
+   image data lives in IndexedDB, which has a far higher storage
+   ceiling on iOS Safari than localStorage's ~5MB. Everything still
+   stays on-device — nothing is ever sent anywhere. */
+const PHOTO_DB_NAME = 'eisen-photos', PHOTO_STORE = 'photos';
+let photoDbPromise = null;
+function openPhotoDb(){
+  if(photoDbPromise) return photoDbPromise;
+  photoDbPromise = new Promise((resolve, reject)=>{
+    if(!('indexedDB' in window)){ reject(new Error('IndexedDB nicht verfügbar')); return; }
+    const req = indexedDB.open(PHOTO_DB_NAME, 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore(PHOTO_STORE, { keyPath:'id' }); };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+  return photoDbPromise;
+}
+async function savePhotoBlob(id, dataUrl){
+  const db = await openPhotoDb();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).put({ id, dataUrl });
+    tx.oncomplete = ()=> resolve(true);
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
+async function getPhotoBlob(id){
+  if(!id) return null;
+  try{
+    const db = await openPhotoDb();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(PHOTO_STORE, 'readonly');
+      const req = tx.objectStore(PHOTO_STORE).get(id);
+      req.onsuccess = ()=> resolve(req.result ? req.result.dataUrl : null);
+      req.onerror = ()=> reject(req.error);
+    });
+  }catch(e){ return null; }
+}
+async function deletePhotoBlob(id){
+  try{
+    const db = await openPhotoDb();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(PHOTO_STORE, 'readwrite');
+      tx.objectStore(PHOTO_STORE).delete(id);
+      tx.oncomplete = ()=> resolve(true);
+      tx.onerror = ()=> reject(tx.error);
+    });
+  }catch(e){ return false; }
+}
+async function clearAllPhotoBlobs(){
+  try{
+    const db = await openPhotoDb();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(PHOTO_STORE, 'readwrite');
+      tx.objectStore(PHOTO_STORE).clear();
+      tx.oncomplete = ()=> resolve(true);
+      tx.onerror = ()=> reject(tx.error);
+    });
+  }catch(e){ return false; }
+}
+
 const STORE_KEY = 'eisen_state_v3';
 
 /* ---------------- timezone-safe date helpers ----------------
@@ -975,7 +1047,7 @@ function defaultState(){
     checkins: [], workouts: [], journal: [], bodyweights: [], nutrition: [], savedFoods: [],
     measurements: [], photos: [], water: [],
     exerciseLibrary: DEFAULT_EXERCISES.slice().map(e=>({...e})), plans: [],
-    settings: { bodyweightKg: 85, targetWeightKg: null, calorieTargetKcal: null, lastBackupAt: null, backupSnoozeUntil: null, theme: 'dark', notifOptIn: false, dashboardDesign: 'modern', waterTargetMl: 2000 }
+    settings: { bodyweightKg: 85, targetWeightKg: null, calorieTargetKcal: null, lastBackupAt: null, backupSnoozeUntil: null, theme: 'dark', notifOptIn: false, dashboardDesign: 'modern', waterTargetMl: 2000, photosEnabled: true }
   };
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -1017,7 +1089,34 @@ function migrate(raw){
   } else if(raw.protein && raw.protein.length){
     d.nutrition = raw.protein.map(p=>({ id:uid(), date:p.date, meal:'snacks', name:'Protein-Eintrag', kcal:0, protein:p.grams, carbs:0, fat:0 }));
   }
+
+  // Strip any embedded photo data (from pre-IndexedDB versions or a full JSON backup)
+  // into the pending-migration queue, keeping only lightweight id references in state.
+  d.photos = (d.photos||[]).map(p=>{
+    if(p.dataUrl){ pendingPhotoMigrations.push({ id:p.id, dataUrl:p.dataUrl }); return { id:p.id, date:p.date }; }
+    return p;
+  });
+  d.nutrition = d.nutrition.map(n=>{
+    if(n.photo){
+      const pid = n.photoId || uid();
+      pendingPhotoMigrations.push({ id:pid, dataUrl:n.photo });
+      const clean = { ...n, photoId:pid };
+      delete clean.photo;
+      return clean;
+    }
+    return n;
+  });
+
   return d;
+}
+let pendingPhotoMigrations = [];
+async function flushPendingPhotoMigrations(){
+  if(pendingPhotoMigrations.length===0) return;
+  const batch = pendingPhotoMigrations;
+  pendingPhotoMigrations = [];
+  for(const p of batch){
+    try{ await savePhotoBlob(p.id, p.dataUrl); }catch(e){ console.error('Foto-Migration fehlgeschlagen', p.id, e); }
+  }
 }
 function loadState(){
   try{
@@ -1210,20 +1309,33 @@ document.getElementById('calYearNext').addEventListener('click', ()=>{ if(calYea
 updateDateLabel();
 
 /* ---------------- settings: backup export / import / reset ---------------- */
-function renderStorageUsage(){
+async function renderStorageUsage(){
+  const textEl = document.getElementById('storageUsageText');
+  const bar = document.getElementById('storageUsageBar');
+  const photoCount = state.photos.length + state.nutrition.filter(n=>n.photoId).length;
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      const { usage, quota } = await navigator.storage.estimate();
+      const usedMb = usage/1024/1024;
+      const quotaMb = quota/1024/1024;
+      const pct = quota ? Math.min(100, Math.round((usage/quota)*100)) : 0;
+      textEl.textContent = `${usedMb.toFixed(1)} MB von ${quotaMb>=1024 ? (quotaMb/1024).toFixed(1)+' GB' : Math.round(quotaMb)+' MB'} belegt (${photoCount} Foto${photoCount===1?'':'s'})`;
+      bar.style.width = pct+'%';
+      bar.style.background = pct>=80 ? 'var(--coral)' : pct>=50 ? 'var(--ember)' : 'var(--teal)';
+      return;
+    }
+  }catch(e){ /* fall through to the localStorage-only estimate below */ }
   try{
     const raw = localStorage.getItem(STORE_KEY) || '';
     const bytes = new Blob([raw]).size;
     const mb = bytes/1024/1024;
-    const assumedLimitMb = 5; // typical browser localStorage ceiling (varies, but 5MB is a safe conservative estimate)
+    const assumedLimitMb = 5;
     const pct = Math.min(100, Math.round((mb/assumedLimitMb)*100));
-    const photoCount = state.photos.length + state.nutrition.filter(n=>n.photo).length;
-    document.getElementById('storageUsageText').textContent = `${mb.toFixed(1)} MB belegt (${photoCount} Foto${photoCount===1?'':'s'}) · geschätzt ${pct}% eines typischen Browser-Limits`;
-    const bar = document.getElementById('storageUsageBar');
+    textEl.textContent = `${mb.toFixed(1)} MB Textdaten belegt (${photoCount} Foto${photoCount===1?'':'s'} separat in IndexedDB, nicht mitgezählt)`;
     bar.style.width = pct+'%';
     bar.style.background = pct>=80 ? 'var(--coral)' : pct>=50 ? 'var(--ember)' : 'var(--teal)';
   }catch(e){
-    document.getElementById('storageUsageText').textContent = 'Speichernutzung konnte nicht ermittelt werden.';
+    textEl.textContent = 'Speichernutzung konnte nicht ermittelt werden.';
   }
 }
 function openSettings(){
@@ -1261,9 +1373,14 @@ function reRenderEverything(){
   renderErnaehrung();
 }
 
-document.getElementById('exportBtn').addEventListener('click', ()=>{
+document.getElementById('exportBtn').addEventListener('click', async ()=>{
+  const statusEl = document.getElementById('settingsStatus');
+  statusEl.textContent = 'Backup wird erstellt...';
   try{
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
+    const exportState = JSON.parse(JSON.stringify(state));
+    for(const p of exportState.photos){ p.dataUrl = await getPhotoBlob(p.id); }
+    for(const n of exportState.nutrition){ if(n.photoId){ n.photo = await getPhotoBlob(n.photoId); } }
+    const blob = new Blob([JSON.stringify(exportState, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1275,10 +1392,10 @@ document.getElementById('exportBtn').addEventListener('click', ()=>{
     state.settings.lastBackupAt = Date.now();
     saveState();
     document.getElementById('backupBanner').style.display = 'none';
-    document.getElementById('settingsStatus').textContent = 'Backup wurde heruntergeladen ✓';
+    statusEl.textContent = 'Backup wurde heruntergeladen ✓';
   }catch(e){
     console.error('Export fehlgeschlagen', e);
-    document.getElementById('settingsStatus').textContent = 'Export fehlgeschlagen.';
+    statusEl.textContent = 'Export fehlgeschlagen.';
   }
 });
 
@@ -1324,11 +1441,13 @@ document.getElementById('importFile').addEventListener('change', (e)=>{
   const file = e.target.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = ()=>{
+  reader.onload = async ()=>{
     try{
       const parsed = JSON.parse(reader.result);
       if(!confirm('Alle aktuellen Daten in EISEN durch dieses Backup ersetzen? Das kann nicht rückgängig gemacht werden.')) { e.target.value=''; return; }
+      await clearAllPhotoBlobs();
       state = migrate(parsed);
+      await flushPendingPhotoMigrations();
       saveState();
       reRenderEverything();
       document.getElementById('settingsStatus').textContent = 'Backup wurde importiert ✓';
@@ -1341,13 +1460,15 @@ document.getElementById('importFile').addEventListener('change', (e)=>{
   reader.readAsText(file);
 });
 
-document.getElementById('resetBtn').addEventListener('click', ()=>{
+document.getElementById('resetBtn').addEventListener('click', async ()=>{
   if(!confirm('Wirklich ALLE Daten löschen (Check-ins, Training, Journal, Ernährung, Pläne)? Das kann nicht rückgängig gemacht werden.')) return;
   localStorage.removeItem(STORE_KEY);
+  await clearAllPhotoBlobs();
   state = defaultState();
   saveState();
   applyTheme();
   applyDashboardDesign();
+  applyPhotosToggle();
   reRenderEverything();
   closeSettings();
 });
@@ -1363,6 +1484,20 @@ document.getElementById('themeDarkBtn').addEventListener('click', ()=>{ state.se
 document.getElementById('themeLightBtn').addEventListener('click', ()=>{ state.settings.theme='light'; saveState(); applyTheme(); });
 applyTheme();
 
+/* ---------------- photo storage consent toggle ---------------- */
+function applyPhotosToggle(){
+  const on = state.settings.photosEnabled !== false;
+  document.getElementById('photosOnBtn').classList.toggle('active', on);
+  document.getElementById('photosOffBtn').classList.toggle('active', !on);
+  document.querySelectorAll('#foodPhotoBtn, #addPhotoBtn').forEach(b=>{
+    b.disabled = !on;
+    b.style.opacity = on ? '1' : '0.5';
+    b.textContent = on ? b.dataset.labelOn : 'Fotos sind deaktiviert';
+  });
+}
+document.getElementById('photosOnBtn').addEventListener('click', ()=>{ state.settings.photosEnabled=true; saveState(); applyPhotosToggle(); });
+document.getElementById('photosOffBtn').addEventListener('click', ()=>{ state.settings.photosEnabled=false; saveState(); applyPhotosToggle(); });
+
 /* ---------------- dashboard design (modern centered-ring vs classic dual-arc) ---------------- */
 function applyDashboardDesign(){
   const modern = state.settings.dashboardDesign !== 'classic';
@@ -1374,6 +1509,7 @@ function applyDashboardDesign(){
 document.getElementById('designModernBtn').addEventListener('click', ()=>{ state.settings.dashboardDesign='modern'; saveState(); applyDashboardDesign(); });
 document.getElementById('designClassicBtn').addEventListener('click', ()=>{ state.settings.dashboardDesign='classic'; saveState(); applyDashboardDesign(); });
 applyDashboardDesign();
+applyPhotosToggle();
 
 /* ---------------- notifications (best-effort, foreground only — see settings copy) ---------------- */
 document.getElementById('notifOptInBtn').addEventListener('click', async ()=>{
@@ -2508,31 +2644,36 @@ function compressImage(file, maxW=480, quality=0.72){
     reader.readAsDataURL(file);
   });
 }
-function renderPhotoGallery(){
+async function renderPhotoGallery(){
   const el = document.getElementById('photoGallery');
   const emptyEl = document.getElementById('photoEmpty');
   const sorted = [...state.photos].sort((a,b)=>b.date.localeCompare(a.date));
   if(sorted.length===0){ el.innerHTML=''; emptyEl.style.display='block'; return; }
   emptyEl.style.display='none';
   el.innerHTML = sorted.map(p=>`
-    <div class="photo-thumb-wrap"><img class="photo-thumb" src="${p.dataUrl}" data-pid="${p.id}"><div class="photo-thumb-date">${fmtDate(p.date)}</div></div>
+    <div class="photo-thumb-wrap"><img class="photo-thumb" data-pid="${p.id}"><div class="photo-thumb-date">${fmtDate(p.date)}</div></div>
   `).join('');
   el.querySelectorAll('.photo-thumb').forEach(img=>{
     img.addEventListener('click', ()=> openPhotoLightbox(img.dataset.pid));
+    getPhotoBlob(img.dataset.pid).then(url=>{ if(url) img.src = url; });
   });
 }
-document.getElementById('addPhotoBtn').addEventListener('click', ()=> document.getElementById('photoInput').click());
+document.getElementById('addPhotoBtn').addEventListener('click', ()=>{
+  if(state.settings.photosEnabled===false){ alert('Fotos sind in den Einstellungen deaktiviert. Schalte sie unter Einstellungen → Fotos speichern wieder an.'); return; }
+  document.getElementById('photoInput').click();
+});
 document.getElementById('photoInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
   try{
     const dataUrl = await compressImage(file);
-    const photo = { id:uid(), date:viewingDate, dataUrl };
-    state.photos.push(photo);
-    if(!saveState()){
-      state.photos.pop();
-      alert('Foto konnte nicht gespeichert werden — der lokale Speicher deines Browsers ist voll. Lösche ältere Fotos oder exportiere ein Backup und starte danach mit "Alle Daten löschen" neu.');
+    const id = uid();
+    const saved = await savePhotoBlob(id, dataUrl).catch(()=>false);
+    if(!saved){
+      alert('Foto konnte nicht gespeichert werden — der lokale Speicher deines Geräts ist voll oder nicht verfügbar.');
     } else {
+      state.photos.push({ id, date:viewingDate });
+      saveState();
       renderPhotoGallery();
     }
   }catch(err){
@@ -2542,20 +2683,23 @@ document.getElementById('photoInput').addEventListener('change', async (e)=>{
   e.target.value = '';
 });
 let lightboxPhotoId = null;
-function openPhotoLightbox(id){
+async function openPhotoLightbox(id){
   const photo = state.photos.find(p=>p.id===id);
   if(!photo) return;
   lightboxPhotoId = id;
-  document.getElementById('photoLightboxImg').src = photo.dataUrl;
+  const url = await getPhotoBlob(id);
+  if(!url){ alert('Foto konnte nicht geladen werden.'); return; }
+  document.getElementById('photoLightboxImg').src = url;
   document.getElementById('photoLightbox').classList.add('open');
 }
 document.getElementById('photoLightboxClose').addEventListener('click', ()=> document.getElementById('photoLightbox').classList.remove('open'));
 document.getElementById('photoLightbox').addEventListener('click', (e)=>{ if(e.target.id==='photoLightbox') document.getElementById('photoLightbox').classList.remove('open'); });
-document.getElementById('photoLightboxDelete').addEventListener('click', ()=>{
+document.getElementById('photoLightboxDelete').addEventListener('click', async ()=>{
   if(!lightboxPhotoId) return;
   if(!confirm('Dieses Foto wirklich löschen?')) return;
   state.photos = state.photos.filter(p=>p.id!==lightboxPhotoId);
   saveState();
+  await deletePhotoBlob(lightboxPhotoId);
   document.getElementById('photoLightbox').classList.remove('open');
   renderPhotoGallery();
 });
@@ -2741,7 +2885,7 @@ function renderErnaehrung(){
     items.forEach(n=>{
       const row = document.createElement('div');
       row.className='food-item';
-      row.innerHTML = `<div style="display:flex; align-items:center; gap:10px;">${n.photo?`<img src="${n.photo}" style="width:34px; height:34px; border-radius:8px; object-fit:cover; flex-shrink:0;">`:''}<div><div class="fname">${n.name}</div><div class="fmacros">P ${Math.round(n.protein||0)} · K ${Math.round(n.carbs||0)} · F ${Math.round(n.fat||0)}</div></div></div>
+      row.innerHTML = `<div style="display:flex; align-items:center; gap:10px;">${n.photoId?`<img data-photoid="${n.photoId}" style="width:34px; height:34px; border-radius:8px; object-fit:cover; flex-shrink:0; background:var(--surface-2);">`:''}<div><div class="fname">${n.name}</div><div class="fmacros">P ${Math.round(n.protein||0)} · K ${Math.round(n.carbs||0)} · F ${Math.round(n.fat||0)}</div></div></div>
         <div style="display:flex; align-items:center;"><span class="fkcal">${Math.round(n.kcal||0)}</span><button type="button" class="frm" data-id="${n.id}">×</button></div>`;
       sec.appendChild(row);
     });
@@ -2751,6 +2895,9 @@ function renderErnaehrung(){
     sec.appendChild(addBtn);
     mealsEl.appendChild(sec);
   });
+  mealsEl.querySelectorAll('img[data-photoid]').forEach(img=>{
+    getPhotoBlob(img.dataset.photoid).then(url=>{ if(url) img.src = url; });
+  });
   mealsEl.querySelectorAll('.frm').forEach(b=> b.addEventListener('click', ()=>{
     const idx = state.nutrition.findIndex(n=>n.id===b.dataset.id);
     if(idx===-1) return;
@@ -2758,6 +2905,9 @@ function renderErnaehrung(){
     state.nutrition.splice(idx,1);
     saveState(); renderErnaehrung();
     showUndoToast(`"${removed.name}" entfernt.`, ()=>{ state.nutrition.splice(idx,0,removed); saveState(); renderErnaehrung(); });
+    if(removed.photoId){
+      setTimeout(()=>{ if(!state.nutrition.some(n=>n.id===removed.id)) deletePhotoBlob(removed.photoId); }, 3500);
+    }
   }));
 
   const days14=[]; for(let i=13;i>=0;i--) days14.push(daysAgo(i));
@@ -2775,7 +2925,7 @@ function renderErnaehrung(){
 
 /* ---- inline add-food form (replaces prompt() dialogs) + saved foods (Meine Gerichte) ---- */
 let activeFoodMealId = null;
-let currentFoodPhoto = null;
+let currentFoodPhotoId = null;
 function openFoodForm(mealId){
   activeFoodMealId = mealId;
   document.getElementById('foodFormTitle').textContent = 'Eintrag zu ' + (MEALS.find(m=>m.id===mealId)?.name || '');
@@ -2793,6 +2943,7 @@ function closeFoodForm(){
   document.getElementById('foodFormCard').style.display='none';
   activeFoodMealId=null;
   stopBarcodeScanner();
+  if(currentFoodPhotoId){ deletePhotoBlob(currentFoodPhotoId); currentFoodPhotoId=null; }
 }
 function switchFoodFormTab(tab){
   document.querySelectorAll('.ff-tab').forEach(b=> b.classList.toggle('active', b.dataset.fftab===tab));
@@ -2842,23 +2993,17 @@ document.getElementById('foodAddBtn').addEventListener('click', ()=>{
   comboIngredients.forEach(ing=>{ kcal+=ing.kcal||0; protein+=ing.protein||0; carbs+=ing.carbs||0; fat+=ing.fat||0; });
   const finalName = comboIngredients.length ? `${name} (${comboIngredients.length+1} Teile)` : name;
   const entry = { id:uid(), date:viewingDate, meal:activeFoodMealId, name:finalName, kcal, protein, carbs, fat };
-  if(currentFoodPhoto) entry.photo = currentFoodPhoto;
+  if(currentFoodPhotoId) entry.photoId = currentFoodPhotoId;
   state.nutrition.push(entry);
   if(document.getElementById('foodSaveToggle').checked){
     state.savedFoods.push({ id:uid(), name:finalName, kcal, protein, carbs, fat });
   }
   if(!saveState()){
     state.nutrition.pop();
-    if(currentFoodPhoto){
-      delete entry.photo;
-      state.nutrition.push(entry);
-      saveState();
-      alert('Speicher ist voll — Eintrag wurde ohne Foto gespeichert. Lösche ältere Fotos, um wieder Platz zu schaffen.');
-    } else {
-      alert('Eintrag konnte nicht gespeichert werden — der lokale Speicher ist voll.');
-      return;
-    }
+    alert('Eintrag konnte nicht gespeichert werden — der lokale Speicher ist voll.');
+    return;
   }
+  currentFoodPhotoId = null; // now safely attached to the saved entry; don't delete it on next form reset
   closeFoodForm();
   renderErnaehrung();
 });
@@ -3022,7 +3167,8 @@ async function getMobilenetModel(){
   return mobilenetModel;
 }
 function resetFoodPhotoUI(){
-  currentFoodPhoto = null;
+  if(currentFoodPhotoId) deletePhotoBlob(currentFoodPhotoId);
+  currentFoodPhotoId = null;
   document.getElementById('foodPhotoPreviewWrap').style.display = 'none';
   document.getElementById('foodClassifyResult').style.display = 'none';
   document.getElementById('foodClassifyStatus').textContent = '';
@@ -3078,13 +3224,19 @@ document.getElementById('comboAddIngredientBtn').addEventListener('click', ()=>{
   renderComboIngredients();
 });
 
-document.getElementById('foodPhotoBtn').addEventListener('click', ()=> document.getElementById('foodPhotoInput').click());
+document.getElementById('foodPhotoBtn').addEventListener('click', ()=>{
+  if(state.settings.photosEnabled===false){ alert('Fotos sind in den Einstellungen deaktiviert. Schalte sie unter Einstellungen → Fotos speichern wieder an.'); return; }
+  document.getElementById('foodPhotoInput').click();
+});
 document.getElementById('foodPhotoInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
   try{
     const dataUrl = await compressImage(file, 320, 0.6);
-    currentFoodPhoto = dataUrl;
+    const id = uid();
+    const saved = await savePhotoBlob(id, dataUrl).catch(()=>false);
+    if(!saved){ alert('Foto konnte nicht gespeichert werden — der lokale Speicher deines Geräts ist voll oder nicht verfügbar.'); e.target.value=''; return; }
+    currentFoodPhotoId = id;
     document.getElementById('foodPhotoPreviewWrap').style.display = 'block';
     const img = document.getElementById('foodPhotoPreview');
     img.src = dataUrl;
@@ -3134,6 +3286,10 @@ document.getElementById('foodPhotoRemoveBtn').addEventListener('click', resetFoo
 renderHome();
 renderTraining();
 maybeShowBackupReminder();
+flushPendingPhotoMigrations().then(()=>{
+  saveState(); // persist the now-lean state (embedded photo data has moved to IndexedDB)
+  if(document.getElementById('view-trends').classList.contains('active')) renderPhotoGallery();
+});
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
