@@ -1,4 +1,4 @@
-const CACHE = 'eisen-v9';
+const CACHE = 'eisen-v10';
 const ASSETS = [
   './',
   './index.html',

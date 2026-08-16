@@ -82,6 +82,8 @@
   .gauge-legend{ display:flex; gap:16px; margin-top:10px; }
   .gauge-legend span{ font-size:10.5px; color:var(--text-faint); display:flex; align-items:center; gap:5px; }
   .gauge-legend i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .streak-badge{ margin-top:12px; display:inline-flex; align-items:center; gap:6px; background:var(--ember-dim); color:var(--ember); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:20px; }
+  .streak-badge .flame{ width:11px; height:11px; }
   .gauge-sub{ font-size:12.5px; color:var(--text-faint); margin-top:12px; text-align:center; max-width:280px; }
   .quote-line{ margin-top:16px; padding-top:14px; border-top:1px solid var(--border); font-style:italic; font-size:13px; color:var(--text-dim); text-align:center; max-width:290px; line-height:1.5; }
 
@@ -120,6 +122,13 @@
   .exercise-head .name{ font-weight:600; font-size:14.5px; }
   .exercise-head .pr{ font-size:11px; color:var(--text-faint); font-family:'JetBrains Mono',monospace; }
   .exercise-head .rm{ background:none; border:none; color:var(--text-faint); font-size:18px; line-height:1; padding:2px 6px; }
+  .coach-row{ display:flex; gap:18px; margin-bottom:8px; flex-wrap:wrap; }
+  .coach-item{ display:flex; flex-direction:column; gap:2px; }
+  .coach-lbl{ font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.05em; }
+  .coach-val{ font-size:12.5px; font-family:'JetBrains Mono',monospace; font-weight:600; }
+  .coach-val .coach-ago{ color:var(--text-faint); font-weight:500; font-size:11px; }
+  .coach-suggestion{ display:inline-block; background:var(--teal-dim); color:var(--teal); font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:8px; margin-bottom:10px; }
+  .coach-spark{ margin-bottom:10px; opacity:0.85; }
   .sets-grid{ display:grid; grid-template-columns:22px 1fr 1fr 22px; gap:8px; align-items:center; margin-bottom:6px; }
   .sets-grid .setno{ color:var(--text-faint); font-size:12px; font-family:'JetBrains Mono',monospace; }
   .sets-grid input{ padding:8px; font-size:13px; }
@@ -249,6 +258,7 @@
             <span><i style="background:var(--teal)"></i>Recovery</span>
             <span><i style="background:var(--coral)"></i>Belastung</span>
           </div>
+          <div class="streak-badge" id="streakBadge" style="display:none;"></div>
           <div class="gauge-sub" id="recoverySub"></div>
           <div class="quote-line" id="quoteLine"></div>
         </div>
@@ -374,6 +384,7 @@
       </div>
       <div class="card">
         <h2>Körpergewicht</h2>
+        <div class="row" id="weightDeltaRow" style="margin-bottom:10px; display:none;"></div>
         <div class="chart-wrap"><canvas id="chartWeight"></canvas></div>
         <label class="field" style="margin-top:14px;">
           <div class="field-head"><span>Neuer Eintrag</span></div>
@@ -779,6 +790,17 @@ const QUOTES = [
 function seededIndex(dateStr, length){ let h=0; for(let i=0;i<dateStr.length;i++){ h=(h*31+dateStr.charCodeAt(i))>>>0; } return h%length; }
 function renderQuote(){ document.getElementById('quoteLine').textContent = '„' + QUOTES[seededIndex(todayStr(), QUOTES.length)] + '"'; }
 
+/* ---- check-in streak (concept from index.html's wt-streak indicator) ---- */
+function currentStreak(){
+  let streak=0;
+  let d = todayStr();
+  while(state.checkins.some(c=>c.date===d)){
+    streak++;
+    const dt = parseDateStr(d); dt.setDate(dt.getDate()-1); d = toDateStr(dt);
+  }
+  return streak;
+}
+
 /* ---------------- dual gauge (SVG dial) ---------------- */
 const START_DEG=-220, END_DEG=40;
 function polar(cx,cy,r,deg){ const rad=deg*Math.PI/180; return { x:cx+r*Math.cos(rad), y:cy+r*Math.sin(rad) }; }
@@ -943,6 +965,14 @@ function renderHome(){
   document.getElementById('targetTile').textContent = range?`${range[0]}–${range[1]}`:'–';
   document.getElementById('targetSub').textContent = range ? (isToday?'empfohlener Bereich heute':'Bereich an diesem Tag') : 'Check-in ausstehend';
   renderQuote();
+  const streak = currentStreak();
+  const streakEl = document.getElementById('streakBadge');
+  if(streak>=2){
+    streakEl.style.display='inline-flex';
+    streakEl.innerHTML = `<svg class="flame" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c1 3-2 4-2 7a4 4 0 008 0c0-2-1-3-1-3 2 1 3 4 3 6a6 6 0 01-12 0c0-4 2-6 4-10z"/></svg>${streak} Tage in Folge`;
+  } else {
+    streakEl.style.display='none';
+  }
 
   if(isToday){
     document.getElementById('checkinCard').style.display='block';
@@ -1010,10 +1040,53 @@ let sessionPlanId = null; // null = "Frei"
 let sessionEntries = []; // [{exerciseId, exerciseName, sets:[{reps,weight}]}]
 
 function exerciseById(id){ return state.exerciseLibrary.find(e=>e.id===id); }
-function bestSetFor(exerciseId){
-  let best=0;
-  state.workouts.forEach(w=>w.entries.forEach(e=>{ if(e.exerciseId===exerciseId) e.sets.forEach(s=>{ if(s.reps>=1 && s.weight>0) best=Math.max(best,s.weight); }); }));
-  return best;
+/* ---- progressive-overload coaching helpers (adapted from gym.html) ---- */
+function estimate1RM(w, r){ if(r<2) return w; return w*(1+r/30); } // Epley formula
+function exerciseSessionHistory(exerciseId){
+  const byDate = {};
+  state.workouts.forEach(w=>{
+    w.entries.forEach(e=>{
+      if(e.exerciseId!==exerciseId) return;
+      e.sets.forEach(s=>{
+        if(!s.reps || !s.weight) return;
+        const orm = estimate1RM(s.weight, s.reps);
+        if(!byDate[w.date] || orm > byDate[w.date].oneRM){ byDate[w.date] = { date:w.date, weight:s.weight, reps:s.reps, oneRM:orm }; }
+      });
+    });
+  });
+  return Object.values(byDate).sort((a,b)=>a.date.localeCompare(b.date));
+}
+function lastSessionBefore(exerciseId, beforeDate){
+  const hist = exerciseSessionHistory(exerciseId).filter(h=>h.date<beforeDate);
+  return hist.length ? hist[hist.length-1] : null;
+}
+function relDaysLabel(dateStr){
+  const diff = Math.round((parseDateStr(viewingDate) - parseDateStr(dateStr))/864e5);
+  if(diff===0) return 'heute';
+  if(diff===1) return 'gestern';
+  return `vor ${diff} Tagen`;
+}
+function rxSuggestion(last){
+  if(!last) return null;
+  if(last.reps>=12){
+    const nextWeight = Math.round((last.weight+2.5)*2)/2;
+    return `Steigern: ${nextWeight} kg · Ziel ~8 Wdh.`;
+  }
+  const nextReps = Math.min(12, last.reps+1);
+  return `${last.weight} kg halten · Ziel ${nextReps} Wdh.`;
+}
+function buildSparkline(hist){
+  const vals = hist.slice(-8).map(h=>h.oneRM);
+  if(vals.length<2) return '';
+  const min=Math.min(...vals), max=Math.max(...vals), range=(max-min)||1;
+  const W=110,H=26,pad=3;
+  const pts = vals.map((v,i)=>{
+    const x = pad + (W-pad*2)*(i/(vals.length-1));
+    const y = H-pad-(H-pad*2)*((v-min)/range);
+    return [x,y];
+  });
+  const path = pts.map((p,i)=> (i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;"><path d="${path}" fill="none" stroke="#5EC8A8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 function loadSessionForDate(){
   const existing = state.workouts.find(w=>w.date===viewingDate && w.planId===sessionPlanId);
@@ -1053,7 +1126,11 @@ function renderSessionExercises(){
   if(sessionEntries.length===0){ list.innerHTML = '<div class="empty">Noch keine Übungen für diesen Tag.</div>'; return; }
   list.innerHTML='';
   sessionEntries.forEach((entry, ei)=>{
-    const pr = bestSetFor(entry.exerciseId);
+    const hist = exerciseSessionHistory(entry.exerciseId);
+    const last = lastSessionBefore(entry.exerciseId, viewingDate);
+    const oneRM = hist.length ? Math.round(Math.max(...hist.map(h=>h.oneRM))) : null;
+    const suggestion = rxSuggestion(last);
+    const spark = buildSparkline(hist);
     const wrap = document.createElement('div');
     wrap.className='exercise';
     let setsHtml='';
@@ -1067,9 +1144,15 @@ function renderSessionExercises(){
     });
     wrap.innerHTML = `
       <div class="exercise-head">
-        <span class="name">${entry.exerciseName}${pr>0?`<span class="pr"> · PR ${pr}kg</span>`:''}</span>
+        <span class="name">${entry.exerciseName}</span>
         <button type="button" class="rm" data-ei="${ei}" aria-label="Übung entfernen">×</button>
       </div>
+      ${(last || oneRM) ? `<div class="coach-row">
+        ${last ? `<div class="coach-item"><span class="coach-lbl">Letztes Mal</span><span class="coach-val">${last.weight} kg × ${last.reps} <span class="coach-ago">(${relDaysLabel(last.date)})</span></span></div>` : ''}
+        ${oneRM ? `<div class="coach-item"><span class="coach-lbl">Geschätzte 1RM</span><span class="coach-val">${oneRM} kg</span></div>` : ''}
+      </div>` : ''}
+      ${suggestion ? `<div class="coach-suggestion">${suggestion}</div>` : ''}
+      ${spark ? `<div class="coach-spark">${spark}</div>` : ''}
       <div class="col-labels"><span></span><span>Wdh.</span><span>kg</span><span></span></div>
       ${setsHtml}
       <button type="button" class="addset-btn" data-ei="${ei}">+ Satz</button>
@@ -1272,6 +1355,29 @@ function baseLineOptions(){
     scales:{ x:{grid:{display:false}, ticks:{maxRotation:0, autoSkip:true, maxTicksLimit:6}}, y:{grid:{color:'#2A2E35'}, ticks:{maxTicksLimit:4}} },
     elements:{ point:{radius:3, hoverRadius:5}, line:{tension:0.35} } };
 }
+/* ---- weight delta comparison (concept from index.html's wt-delta/wt-comp) ---- */
+function weightDeltaVs(daysBack){
+  const sorted = [...state.bodyweights].sort((a,b)=>a.date.localeCompare(b.date));
+  if(sorted.length===0) return null;
+  const latest = sorted[sorted.length-1];
+  const targetDate = daysAgo(daysBack);
+  const candidates = sorted.filter(b=>b.date<=targetDate);
+  if(candidates.length===0) return null;
+  const base = candidates[candidates.length-1];
+  return +(latest.kg-base.kg).toFixed(1);
+}
+function renderWeightDeltas(){
+  const row = document.getElementById('weightDeltaRow');
+  const d7 = weightDeltaVs(7), d30 = weightDeltaVs(30);
+  if(d7===null && d30===null){ row.style.display='none'; return; }
+  row.style.display='flex';
+  const fmt = (d)=> d===null ? '–' : (d>0?'+':'')+d+' kg';
+  const col = (d)=> d===null ? 'var(--text-faint)' : (d>0?'var(--ember)':d<0?'var(--teal)':'var(--text-dim)');
+  row.innerHTML = `
+    <div style="flex:1;"><div class="tile-val mono" style="font-size:18px; color:${col(d7)};">${fmt(d7)}</div><div class="tile-sub">7 Tage</div></div>
+    <div style="flex:1;"><div class="tile-val mono" style="font-size:18px; color:${col(d30)};">${fmt(d30)}</div><div class="tile-sub">30 Tage</div></div>
+  `;
+}
 function renderTrends(){
  try{
   const days30=[]; for(let i=29;i>=0;i--) days30.push(daysAgo(i));
@@ -1325,6 +1431,7 @@ function renderTrends(){
   } else {
     ['chartRecovery','chartVolume','chartWeight'].forEach(id=>{ const c=document.getElementById(id); if(c && c.parentElement) c.parentElement.innerHTML='<div class="empty">Diagramm momentan nicht verfügbar (Netzwerk).</div>'; });
   }
+  renderWeightDeltas();
 
   const histEl = document.getElementById('workoutHistory');
   const sorted = [...state.workouts].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,12);
