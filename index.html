@@ -91,6 +91,20 @@
   .gauge-legend{ display:flex; gap:16px; margin-top:10px; }
   .gauge-legend span{ font-size:10.5px; color:var(--text-faint); display:flex; align-items:center; gap:5px; }
   .gauge-legend i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+  .gauge-modern{ padding:4px 0 2px 0; }
+  .ring-wrap{ display:flex; justify-content:center; margin-bottom:6px; }
+  .ring-outer{ width:132px; height:132px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:var(--border); transition:background .3s ease; }
+  .ring-inner{ width:108px; height:108px; border-radius:50%; background:var(--surface); display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .ring-num{ font-size:34px; font-weight:700; line-height:1; color:var(--text); }
+  .ring-lbl{ font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.07em; margin-top:4px; }
+  .modern-status{ text-align:center; margin:14px 0 18px; }
+  .modern-headline{ font-size:13.5px; color:var(--text); font-weight:600; margin-bottom:4px; }
+  .modern-subline{ font-size:12px; color:var(--text-dim); line-height:1.5; }
+  .modern-tiles{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .modern-tile{ background:var(--surface-2); border-radius:10px; padding:11px; text-align:center; }
+  .modern-tile .mt-val{ font-size:16px; font-family:'JetBrains Mono',monospace; font-weight:600; color:var(--text); }
+  .modern-tile .mt-lbl{ font-size:9.5px; color:var(--text-faint); margin-top:4px; text-transform:uppercase; letter-spacing:0.05em; }
   .streak-badge{ margin-top:12px; display:inline-flex; align-items:center; gap:6px; background:var(--ember-dim); color:var(--ember); font-size:11.5px; font-weight:700; padding:5px 12px; border-radius:20px; }
   .streak-badge .flame{ width:11px; height:11px; }
   .gauge-sub{ font-size:12.5px; color:var(--text-faint); margin-top:12px; text-align:center; max-width:280px; }
@@ -338,7 +352,8 @@
 
       <div class="card">
         <h2>Heutiger Zustand</h2>
-        <div class="gauge-wrap">
+
+        <div class="gauge-wrap" id="gaugeClassicWrap">
           <svg id="gaugeSvg" viewBox="0 0 240 175" width="240" height="175"></svg>
           <div class="gauge-readouts">
             <div class="gauge-readout"><div class="num display" id="recoveryNum" style="color:var(--teal)">–</div><div class="lbl">Recovery</div></div>
@@ -348,9 +363,31 @@
             <span><i style="background:var(--teal)"></i>Recovery</span>
             <span><i style="background:var(--coral)"></i>Belastung</span>
           </div>
-          <div class="streak-badge" id="streakBadge" style="display:none;"></div>
+          <div class="streak-badge" id="streakBadgeClassic" style="display:none;"></div>
           <div class="gauge-sub" id="recoverySub"></div>
           <div class="quote-line" id="quoteLine"></div>
+        </div>
+
+        <div class="gauge-modern" id="gaugeModernWrap" style="display:none;">
+          <div class="ring-wrap">
+            <div class="ring-outer" id="modernRingOuter">
+              <div class="ring-inner">
+                <div class="ring-num display" id="modernRecoveryNum">–</div>
+                <div class="ring-lbl">Recovery</div>
+              </div>
+            </div>
+          </div>
+          <div class="streak-badge" id="streakBadgeModern" style="display:none; margin:0 auto 12px; width:fit-content;"></div>
+          <div class="modern-status">
+            <div class="modern-headline" id="modernHeadline"></div>
+            <div class="modern-subline" id="modernSubline"></div>
+          </div>
+          <div class="modern-tiles">
+            <div class="modern-tile"><div class="mt-val" id="modernSleepVal">–</div><div class="mt-lbl">Schlaf</div></div>
+            <div class="modern-tile"><div class="mt-val" id="modernSorenessVal">–</div><div class="mt-lbl">Kater</div></div>
+            <div class="modern-tile"><div class="mt-val" id="modernStrainVal" style="color:var(--coral)">–</div><div class="mt-lbl">Belastung</div></div>
+          </div>
+          <div class="quote-line" id="quoteLineModern"></div>
         </div>
       </div>
 
@@ -671,6 +708,15 @@
       </div>
 
       <div class="settings-section">
+        <h4>Dashboard-Design</h4>
+        <p>Wie der "Heutiger Zustand"-Bereich oben auf dem Dashboard angezeigt wird.</p>
+        <div class="split-toggle" style="margin-bottom:0;">
+          <button type="button" id="designModernBtn" class="active">Neu</button>
+          <button type="button" id="designClassicBtn">Klassisch</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h4>Erinnerungen</h4>
         <p>Aktiviert Benachrichtigungen, während EISEN geöffnet ist. Echte tägliche Push-Erinnerungen bei geschlossener App sind bei einer reinen Web-App ohne eigenen Server nicht zuverlässig möglich — iOS beendet dafür nötige Hintergrundprozesse. Für zuverlässige tägliche Erinnerungen empfiehlt sich eine Kurzbefehle-Automation.</p>
         <button type="button" class="btn ghost" id="notifOptInBtn">Benachrichtigungen erlauben</button>
@@ -791,7 +837,7 @@ function defaultState(){
     checkins: [], workouts: [], journal: [], bodyweights: [], nutrition: [], savedFoods: [],
     measurements: [], photos: [],
     exerciseLibrary: DEFAULT_EXERCISES.slice().map(e=>({...e})), plans: [],
-    settings: { bodyweightKg: 85, targetWeightKg: null, calorieTargetKcal: null, lastBackupAt: null, backupSnoozeUntil: null, theme: 'dark', notifOptIn: false }
+    settings: { bodyweightKg: 85, targetWeightKg: null, calorieTargetKcal: null, lastBackupAt: null, backupSnoozeUntil: null, theme: 'dark', notifOptIn: false, dashboardDesign: 'modern' }
   };
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -1073,6 +1119,7 @@ document.getElementById('resetBtn').addEventListener('click', ()=>{
   state = defaultState();
   saveState();
   applyTheme();
+  applyDashboardDesign();
   reRenderEverything();
   closeSettings();
 });
@@ -1087,6 +1134,18 @@ function applyTheme(){
 document.getElementById('themeDarkBtn').addEventListener('click', ()=>{ state.settings.theme='dark'; saveState(); applyTheme(); });
 document.getElementById('themeLightBtn').addEventListener('click', ()=>{ state.settings.theme='light'; saveState(); applyTheme(); });
 applyTheme();
+
+/* ---------------- dashboard design (modern centered-ring vs classic dual-arc) ---------------- */
+function applyDashboardDesign(){
+  const modern = state.settings.dashboardDesign !== 'classic';
+  document.getElementById('gaugeModernWrap').style.display = modern ? 'block' : 'none';
+  document.getElementById('gaugeClassicWrap').style.display = modern ? 'none' : 'block';
+  document.getElementById('designModernBtn').classList.toggle('active', modern);
+  document.getElementById('designClassicBtn').classList.toggle('active', !modern);
+}
+document.getElementById('designModernBtn').addEventListener('click', ()=>{ state.settings.dashboardDesign='modern'; saveState(); applyDashboardDesign(); });
+document.getElementById('designClassicBtn').addEventListener('click', ()=>{ state.settings.dashboardDesign='classic'; saveState(); applyDashboardDesign(); });
+applyDashboardDesign();
 
 /* ---------------- notifications (best-effort, foreground only — see settings copy) ---------------- */
 document.getElementById('notifOptInBtn').addEventListener('click', async ()=>{
@@ -1121,7 +1180,11 @@ const QUOTES = [
   "Heute zählt, nicht die perfekte Woche.","Kleine Fortschritte sind immer noch Fortschritte."
 ];
 function seededIndex(dateStr, length){ let h=0; for(let i=0;i<dateStr.length;i++){ h=(h*31+dateStr.charCodeAt(i))>>>0; } return h%length; }
-function renderQuote(){ document.getElementById('quoteLine').textContent = '„' + QUOTES[seededIndex(todayStr(), QUOTES.length)] + '"'; }
+function renderQuote(){
+  const q = '„' + QUOTES[seededIndex(todayStr(), QUOTES.length)] + '"';
+  document.getElementById('quoteLine').textContent = q;
+  document.getElementById('quoteLineModern').textContent = q;
+}
 
 /* ---- check-in streak (concept from index.html's wt-streak indicator) ---- */
 function currentStreak(){
@@ -1151,11 +1214,47 @@ function drawGauge(recovery, strain){
   for(let d=START_DEG; d<=END_DEG+0.01; d+=26){ const p1=polar(cx,cy,rOuter+11,d), p2=polar(cx,cy,rOuter+17,d); html += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="${tickColor}" stroke-width="2" stroke-linecap="round"/>`; }
   svg.innerHTML = html;
 }
+function recoveryHeadline(score){
+  if(score===null) return 'Noch kein Check-in';
+  if(score>=75) return 'Gut erholt';
+  if(score>=50) return 'Moderate Erholung';
+  return 'Niedrige Erholung';
+}
 function recoverySubtext(score, strain){
   if(score===null) return 'Trag unten deinen Schlaf und Zustand ein, um deinen Wert zu berechnen.';
   let txt = score>=75 ? 'Gut erholt – Raum für eine intensive Einheit.' : score>=50 ? 'Moderate Erholung – normales Pensum, sauberer Formstil.' : 'Niedrige Erholung – leichteres Volumen oder ein Ruhetag erwägen.';
   if(strain!==null) txt += ` Belastung: ${strain}/21.`;
   return txt;
+}
+function recoverySublineShort(score){
+  if(score===null) return 'Check-in ausstehend.';
+  if(score>=75) return 'Raum für eine intensive Einheit heute.';
+  if(score>=50) return 'Normales Pensum, sauberer Formstil.';
+  return 'Leichteres Volumen oder ein Ruhetag erwägen.';
+}
+function recoveryColorVar(score){
+  if(score===null) return 'var(--border)';
+  if(score>=75) return 'var(--teal)';
+  if(score>=50) return 'var(--ember)';
+  return 'var(--coral)';
+}
+function updateModernGauge(recovery, strain, sleepHours, soreness, preview){
+  const ring = document.getElementById('modernRingOuter');
+  const colorVar = recoveryColorVar(recovery);
+  if(recovery===null){
+    ring.style.background = 'var(--border)';
+  } else {
+    const deg = Math.round((recovery/100)*360);
+    ring.style.background = `conic-gradient(${colorVar} ${deg}deg, var(--border) 0)`;
+  }
+  const numEl = document.getElementById('modernRecoveryNum');
+  numEl.textContent = recovery===null ? '–' : recovery;
+  numEl.style.color = recovery===null ? 'var(--text)' : colorVar;
+  document.getElementById('modernHeadline').textContent = recoveryHeadline(recovery);
+  document.getElementById('modernSubline').textContent = recoverySublineShort(recovery) + (preview ? ' (Vorschau – noch nicht gespeichert)' : '');
+  document.getElementById('modernSleepVal').innerHTML = sleepHours!=null ? sleepHours+'<span style="font-size:11px;">h</span>' : '–';
+  document.getElementById('modernSorenessVal').textContent = soreness!=null ? soreness+'/5' : '–';
+  document.getElementById('modernStrainVal').textContent = strain===null ? '–' : strain+'/21';
 }
 
 /* ---------------- recovery / strain computation ---------------- */
@@ -1235,6 +1334,7 @@ function livePreviewRecovery(){
   const range = strainTargetRange(recovery);
   document.getElementById('targetTile').textContent = range ? `${range[0]}–${range[1]}` : '–';
   document.getElementById('targetSub').textContent = 'Vorschau · noch nicht gespeichert';
+  updateModernGauge(recovery, strain, form.sleepHours, form.soreness, true);
 }
 document.getElementById('checkinForm').addEventListener('submit', (e)=>{
   e.preventDefault();
@@ -1299,15 +1399,15 @@ function renderHome(){
   const range = strainTargetRange(recovery);
   document.getElementById('targetTile').textContent = range?`${range[0]}–${range[1]}`:'–';
   document.getElementById('targetSub').textContent = range ? (isToday?'empfohlener Bereich heute':'Bereich an diesem Tag') : 'Check-in ausstehend';
+  updateModernGauge(recovery, strain, c?c.sleepHours:null, c?c.soreness:null, false);
   renderQuote();
   const streak = currentStreak();
-  const streakEl = document.getElementById('streakBadge');
-  if(streak>=2){
-    streakEl.style.display='inline-flex';
-    streakEl.innerHTML = `<svg class="flame" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c1 3-2 4-2 7a4 4 0 008 0c0-2-1-3-1-3 2 1 3 4 3 6a6 6 0 01-12 0c0-4 2-6 4-10z"/></svg>${streak} Tage in Folge`;
-  } else {
-    streakEl.style.display='none';
-  }
+  const streakHtml = streak>=2 ? `<svg class="flame" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c1 3-2 4-2 7a4 4 0 008 0c0-2-1-3-1-3 2 1 3 4 3 6a6 6 0 01-12 0c0-4 2-6 4-10z"/></svg>${streak} Tage in Folge` : '';
+  ['streakBadgeClassic','streakBadgeModern'].forEach(id=>{
+    const el = document.getElementById(id);
+    el.style.display = streak>=2 ? (id==='streakBadgeModern'?'inline-flex':'inline-flex') : 'none';
+    el.innerHTML = streakHtml;
+  });
 
   if(isToday){
     document.getElementById('checkinCard').style.display='block';
