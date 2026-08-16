@@ -800,6 +800,13 @@
       </div>
 
       <div class="settings-section">
+        <h4>Speicherplatz</h4>
+        <p id="storageUsageText" style="margin-bottom:8px;">Wird berechnet...</p>
+        <div class="progress-bar"><div id="storageUsageBar" style="width:0%;"></div></div>
+        <p style="margin-top:8px; margin-bottom:0;">Fotos verbrauchen davon am meisten. Wird es eng, lösche ältere Fortschritts- oder Essensfotos, oder exportiere ein Backup und setze danach zurück.</p>
+      </div>
+
+      <div class="settings-section">
         <h4>Alles zurücksetzen</h4>
         <p>Löscht sämtliche Daten unwiderruflich und setzt EISEN auf den Ausgangszustand zurück.</p>
         <button type="button" class="btn danger-ghost" id="resetBtn">Alle Daten löschen</button>
@@ -1203,11 +1210,28 @@ document.getElementById('calYearNext').addEventListener('click', ()=>{ if(calYea
 updateDateLabel();
 
 /* ---------------- settings: backup export / import / reset ---------------- */
+function renderStorageUsage(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY) || '';
+    const bytes = new Blob([raw]).size;
+    const mb = bytes/1024/1024;
+    const assumedLimitMb = 5; // typical browser localStorage ceiling (varies, but 5MB is a safe conservative estimate)
+    const pct = Math.min(100, Math.round((mb/assumedLimitMb)*100));
+    const photoCount = state.photos.length + state.nutrition.filter(n=>n.photo).length;
+    document.getElementById('storageUsageText').textContent = `${mb.toFixed(1)} MB belegt (${photoCount} Foto${photoCount===1?'':'s'}) · geschätzt ${pct}% eines typischen Browser-Limits`;
+    const bar = document.getElementById('storageUsageBar');
+    bar.style.width = pct+'%';
+    bar.style.background = pct>=80 ? 'var(--coral)' : pct>=50 ? 'var(--ember)' : 'var(--teal)';
+  }catch(e){
+    document.getElementById('storageUsageText').textContent = 'Speichernutzung konnte nicht ermittelt werden.';
+  }
+}
 function openSettings(){
   document.getElementById('settingsStatus').textContent='';
   document.getElementById('targetWeightInput').value = state.settings.targetWeightKg || '';
   document.getElementById('calorieTargetInput').value = state.settings.calorieTargetKcal || '';
   document.getElementById('waterTargetInput').value = state.settings.waterTargetMl || 2000;
+  renderStorageUsage();
   document.getElementById('settingsOverlay').classList.add('open');
 }
 function closeSettings(){ document.getElementById('settingsOverlay').classList.remove('open'); }
@@ -2559,17 +2583,18 @@ function renderTrends(){
   renderMeasurementChart();
   renderPhotoGallery();
   const days30=[]; for(let i=29;i>=0;i--) days30.push(daysAgo(i));
+  const checkinByDate = new Map(state.checkins.map(c=>[c.date, c]));
   if(chartsAvailable()){
     setupChartDefaults();
-    const recoveryData = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c?c.recovery:null; });
+    const recoveryData = days30.map(d=>{ const c=checkinByDate.get(d); return c?c.recovery:null; });
     destroyChart('recovery');
     charts.recovery = new Chart(document.getElementById('chartRecovery'), { type:'line',
       data:{ labels:days30.map(fmtDate), datasets:[{ data:recoveryData, borderColor:'#5EC8A8', backgroundColor:'rgba(94,200,168,0.12)', fill:true, spanGaps:true }]},
       options: baseLineOptions() });
   }
 
-  const rhrVals = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c&&c.restingHR?c.restingHR:null; });
-  const hrvVals = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c&&c.hrv?c.hrv:null; });
+  const rhrVals = days30.map(d=>{ const c=checkinByDate.get(d); return c&&c.restingHR?c.restingHR:null; });
+  const hrvVals = days30.map(d=>{ const c=checkinByDate.get(d); return c&&c.hrv?c.hrv:null; });
   const hasPhysio = rhrVals.some(v=>v!=null) || hrvVals.some(v=>v!=null);
   document.getElementById('rhrChartWrap').style.display = (hasPhysio && chartsAvailable()) ? 'block' : 'none';
   document.getElementById('rhrEmpty').style.display = (hasPhysio && chartsAvailable()) ? 'none' : 'block';
