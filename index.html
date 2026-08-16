@@ -18,6 +18,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js" defer></script>
 
 <style>
   :root{
@@ -600,13 +603,52 @@
         <h2 id="foodFormTitle">Eintrag hinzufügen</h2>
         <div class="subnav" style="margin-bottom:14px;">
           <button type="button" class="ff-tab active" data-fftab="saved">Meine Gerichte</button>
+          <button type="button" class="ff-tab" data-fftab="barcode">Barcode</button>
           <button type="button" class="ff-tab" data-fftab="new">Neuer Eintrag</button>
         </div>
         <div id="ffSavedTab">
           <div id="savedFoodsList"><div class="empty">Noch keine gespeicherten Gerichte.</div></div>
         </div>
+        <div id="ffBarcodeTab" style="display:none;">
+          <div id="barcodeIdle">
+            <p style="font-size:12.5px; color:var(--text-dim); margin:0 0 12px; line-height:1.5;">Scannt den Barcode auf der Verpackung und lädt die Nährwerte automatisch aus der Open-Food-Facts-Datenbank.</p>
+            <button type="button" class="btn" id="barcodeStartBtn">Scanner starten</button>
+          </div>
+          <div id="barcodeScannerWrap" style="display:none;">
+            <div id="barcodeReaderRegion" style="border-radius:12px; overflow:hidden; margin-bottom:12px;"></div>
+            <button type="button" class="btn ghost" id="barcodeStopBtn">Scanner stoppen</button>
+          </div>
+          <div id="barcodeStatus" class="empty" style="display:none;"></div>
+          <div id="barcodeResult" style="display:none;">
+            <div class="hist-item" style="border-top:none;">
+              <div class="l"><b id="barcodeProductName" style="font-weight:600;"></b><span class="d" id="barcodeProductBrand"></span></div>
+            </div>
+            <label class="field"><div class="field-head"><span>Menge (g)</span></div><input type="number" id="barcodeGramsInput" value="100"></label>
+            <div class="macro-grid" style="margin-bottom:14px;">
+              <div class="tile-sub">kcal: <b class="mono" id="barcodeKcalPreview" style="color:var(--text);">0</b></div>
+              <div class="tile-sub">Protein: <b class="mono" id="barcodeProteinPreview" style="color:var(--text);">0 g</b></div>
+              <div class="tile-sub">Kohlenhydrate: <b class="mono" id="barcodeCarbsPreview" style="color:var(--text);">0 g</b></div>
+              <div class="tile-sub">Fett: <b class="mono" id="barcodeFatPreview" style="color:var(--text);">0 g</b></div>
+            </div>
+            <button type="button" class="btn" id="barcodeAddBtn">Hinzufügen</button>
+            <button type="button" class="btn ghost" id="barcodeScanAgainBtn" style="margin-top:8px;">Nochmal scannen</button>
+          </div>
+        </div>
         <div id="ffNewTab" style="display:none;">
           <label class="field"><div class="field-head"><span>Name</span></div><input type="text" id="foodNameInput" placeholder="z. B. Haferflocken mit Beeren"></label>
+
+          <input type="file" id="foodPhotoInput" accept="image/*" style="display:none;">
+          <button type="button" class="add-food-btn" id="foodPhotoBtn" style="margin-top:0;">+ Foto vom Essen</button>
+          <div id="foodPhotoPreviewWrap" style="display:none; margin-bottom:14px;">
+            <img id="foodPhotoPreview" style="width:100%; max-height:180px; object-fit:cover; border-radius:12px; display:block;">
+            <div id="foodClassifyStatus" class="empty" style="padding:10px 0 0;"></div>
+            <div id="foodClassifyResult" style="display:none; margin-top:8px;">
+              <div class="coach-suggestion tag-halten" id="foodClassifyGuess" style="display:block; text-align:center;"></div>
+              <button type="button" class="btn small ghost" id="foodClassifyApplyBtn" style="width:100%; margin-top:8px;">Geschätzte Werte übernehmen</button>
+            </div>
+            <button type="button" class="btn small ghost" id="foodPhotoRemoveBtn" style="width:100%; margin-top:8px;">Foto entfernen</button>
+          </div>
+
           <div class="macro-grid">
             <label class="field"><div class="field-head"><span>kcal</span></div><input type="number" id="foodKcalInput" placeholder="0"></label>
             <label class="field"><div class="field-head"><span>Protein (g)</span></div><input type="number" id="foodProteinInput" placeholder="0"></label>
@@ -2177,20 +2219,19 @@ document.getElementById('saveMeasurementBtn').addEventListener('click', ()=>{
 });
 
 /* ---- progress photos (compressed, stored locally as base64) ---- */
-function compressImage(file){
+function compressImage(file, maxW=480, quality=0.72){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
     reader.onload = (e)=>{
       const img = new Image();
       img.onload = ()=>{
-        const maxW = 480;
         const scale = Math.min(1, maxW/img.width);
         const canvas = document.createElement('canvas');
         canvas.width = img.width*scale;
         canvas.height = img.height*scale;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.72));
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -2402,7 +2443,7 @@ function renderErnaehrung(){
     items.forEach(n=>{
       const row = document.createElement('div');
       row.className='food-item';
-      row.innerHTML = `<div><div class="fname">${n.name}</div><div class="fmacros">P ${Math.round(n.protein||0)} · K ${Math.round(n.carbs||0)} · F ${Math.round(n.fat||0)}</div></div>
+      row.innerHTML = `<div style="display:flex; align-items:center; gap:10px;">${n.photo?`<img src="${n.photo}" style="width:34px; height:34px; border-radius:8px; object-fit:cover; flex-shrink:0;">`:''}<div><div class="fname">${n.name}</div><div class="fmacros">P ${Math.round(n.protein||0)} · K ${Math.round(n.carbs||0)} · F ${Math.round(n.fat||0)}</div></div></div>
         <div style="display:flex; align-items:center;"><span class="fkcal">${Math.round(n.kcal||0)}</span><button type="button" class="frm" data-id="${n.id}">×</button></div>`;
       sec.appendChild(row);
     });
@@ -2436,6 +2477,7 @@ function renderErnaehrung(){
 
 /* ---- inline add-food form (replaces prompt() dialogs) + saved foods (Meine Gerichte) ---- */
 let activeFoodMealId = null;
+let currentFoodPhoto = null;
 function openFoodForm(mealId){
   activeFoodMealId = mealId;
   document.getElementById('foodFormTitle').textContent = 'Eintrag zu ' + (MEALS.find(m=>m.id===mealId)?.name || '');
@@ -2443,14 +2485,22 @@ function openFoodForm(mealId){
   renderSavedFoodsList();
   ['foodNameInput','foodKcalInput','foodProteinInput','foodCarbsInput','foodFatInput'].forEach(id=> document.getElementById(id).value='');
   document.getElementById('foodSaveToggle').checked = false;
+  resetFoodPhotoUI();
+  resetBarcodeUI();
   document.getElementById('foodFormCard').style.display = 'block';
   document.getElementById('foodFormCard').scrollIntoView({ behavior:'smooth', block:'center' });
 }
-function closeFoodForm(){ document.getElementById('foodFormCard').style.display='none'; activeFoodMealId=null; }
+function closeFoodForm(){
+  document.getElementById('foodFormCard').style.display='none';
+  activeFoodMealId=null;
+  stopBarcodeScanner();
+}
 function switchFoodFormTab(tab){
   document.querySelectorAll('.ff-tab').forEach(b=> b.classList.toggle('active', b.dataset.fftab===tab));
   document.getElementById('ffSavedTab').style.display = tab==='saved' ? 'block' : 'none';
+  document.getElementById('ffBarcodeTab').style.display = tab==='barcode' ? 'block' : 'none';
   document.getElementById('ffNewTab').style.display = tab==='new' ? 'block' : 'none';
+  if(tab!=='barcode') stopBarcodeScanner();
 }
 document.querySelectorAll('.ff-tab').forEach(b=> b.addEventListener('click', ()=> switchFoodFormTab(b.dataset.fftab)));
 document.getElementById('foodFormCancel').addEventListener('click', closeFoodForm);
@@ -2490,14 +2540,240 @@ document.getElementById('foodAddBtn').addEventListener('click', ()=>{
   const protein = parseFloat(document.getElementById('foodProteinInput').value) || 0;
   const carbs = parseFloat(document.getElementById('foodCarbsInput').value) || 0;
   const fat = parseFloat(document.getElementById('foodFatInput').value) || 0;
-  state.nutrition.push({ id:uid(), date:viewingDate, meal:activeFoodMealId, name, kcal, protein, carbs, fat });
+  const entry = { id:uid(), date:viewingDate, meal:activeFoodMealId, name, kcal, protein, carbs, fat };
+  if(currentFoodPhoto) entry.photo = currentFoodPhoto;
+  state.nutrition.push(entry);
   if(document.getElementById('foodSaveToggle').checked){
     state.savedFoods.push({ id:uid(), name, kcal, protein, carbs, fat });
   }
-  saveState();
+  if(!saveState()){
+    state.nutrition.pop();
+    if(currentFoodPhoto){
+      delete entry.photo;
+      state.nutrition.push(entry);
+      saveState();
+      alert('Speicher ist voll — Eintrag wurde ohne Foto gespeichert. Lösche ältere Fotos, um wieder Platz zu schaffen.');
+    } else {
+      alert('Eintrag konnte nicht gespeichert werden — der lokale Speicher ist voll.');
+      return;
+    }
+  }
   closeFoodForm();
   renderErnaehrung();
 });
+
+/* ============================================================
+   BARCODE SCANNER — html5-qrcode (camera) + Open Food Facts (free, no key)
+   ============================================================ */
+let barcodeScannerInstance = null;
+let lastOffProduct = null; // {name, brand, per100: {kcal,protein,carbs,fat}}
+function resetBarcodeUI(){
+  document.getElementById('barcodeIdle').style.display = 'block';
+  document.getElementById('barcodeScannerWrap').style.display = 'none';
+  document.getElementById('barcodeStatus').style.display = 'none';
+  document.getElementById('barcodeResult').style.display = 'none';
+  lastOffProduct = null;
+}
+function barcodeAvailable(){ return typeof Html5Qrcode !== 'undefined'; }
+document.getElementById('barcodeStartBtn').addEventListener('click', async ()=>{
+  if(!barcodeAvailable()){
+    const statusEl = document.getElementById('barcodeStatus');
+    statusEl.style.display='block';
+    statusEl.textContent = 'Scanner momentan nicht verfügbar (Netzwerk). Bitte Internetverbindung prüfen und erneut versuchen.';
+    return;
+  }
+  document.getElementById('barcodeIdle').style.display = 'none';
+  document.getElementById('barcodeScannerWrap').style.display = 'block';
+  document.getElementById('barcodeStatus').style.display = 'none';
+  try{
+    barcodeScannerInstance = new Html5Qrcode('barcodeReaderRegion', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
+      ],
+      verbose: false
+    });
+    await barcodeScannerInstance.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 240, height: 140 } },
+      onBarcodeDetected,
+      ()=>{}
+    );
+  }catch(e){
+    console.error('Kamera-Start fehlgeschlagen', e);
+    document.getElementById('barcodeScannerWrap').style.display = 'none';
+    document.getElementById('barcodeIdle').style.display = 'block';
+    const statusEl = document.getElementById('barcodeStatus');
+    statusEl.style.display='block';
+    statusEl.textContent = 'Kamera konnte nicht gestartet werden. Prüf, ob EISEN Kamerazugriff erlaubt ist (Safari-Einstellungen).';
+  }
+});
+function stopBarcodeScanner(){
+  if(barcodeScannerInstance){
+    barcodeScannerInstance.stop().then(()=>{ barcodeScannerInstance.clear(); barcodeScannerInstance=null; }).catch(()=>{ barcodeScannerInstance=null; });
+  }
+}
+document.getElementById('barcodeStopBtn').addEventListener('click', ()=>{ stopBarcodeScanner(); resetBarcodeUI(); });
+document.getElementById('barcodeScanAgainBtn').addEventListener('click', resetBarcodeUI);
+async function onBarcodeDetected(decodedText){
+  stopBarcodeScanner();
+  document.getElementById('barcodeScannerWrap').style.display = 'none';
+  const statusEl = document.getElementById('barcodeStatus');
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Suche Produkt „' + decodedText + '"...';
+  try{
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${decodedText}.json`);
+    const data = await res.json();
+    if(data.status !== 1 || !data.product){
+      statusEl.textContent = 'Produkt nicht gefunden. Trag es unter "Neuer Eintrag" manuell ein.';
+      return;
+    }
+    const p = data.product;
+    const n = p.nutriments || {};
+    lastOffProduct = {
+      name: p.product_name || 'Unbekanntes Produkt',
+      brand: p.brands || '',
+      per100: {
+        kcal: n['energy-kcal_100g'] ?? n['energy-kcal'] ?? 0,
+        protein: n['proteins_100g'] ?? 0,
+        carbs: n['carbohydrates_100g'] ?? 0,
+        fat: n['fat_100g'] ?? 0,
+      }
+    };
+    statusEl.style.display = 'none';
+    document.getElementById('barcodeResult').style.display = 'block';
+    document.getElementById('barcodeProductName').textContent = lastOffProduct.name;
+    document.getElementById('barcodeProductBrand').textContent = lastOffProduct.brand;
+    document.getElementById('barcodeGramsInput').value = 100;
+    updateBarcodePreview();
+  }catch(e){
+    console.error('Open Food Facts Anfrage fehlgeschlagen', e);
+    statusEl.textContent = 'Abfrage fehlgeschlagen — prüf deine Internetverbindung und versuch es erneut.';
+  }
+}
+function updateBarcodePreview(){
+  if(!lastOffProduct) return;
+  const grams = parseFloat(document.getElementById('barcodeGramsInput').value) || 0;
+  const f = grams/100;
+  document.getElementById('barcodeKcalPreview').textContent = Math.round(lastOffProduct.per100.kcal*f);
+  document.getElementById('barcodeProteinPreview').textContent = Math.round(lastOffProduct.per100.protein*f) + ' g';
+  document.getElementById('barcodeCarbsPreview').textContent = Math.round(lastOffProduct.per100.carbs*f) + ' g';
+  document.getElementById('barcodeFatPreview').textContent = Math.round(lastOffProduct.per100.fat*f) + ' g';
+}
+document.getElementById('barcodeGramsInput').addEventListener('input', updateBarcodePreview);
+document.getElementById('barcodeAddBtn').addEventListener('click', ()=>{
+  if(!lastOffProduct) return;
+  const grams = parseFloat(document.getElementById('barcodeGramsInput').value) || 0;
+  const f = grams/100;
+  const entry = {
+    id:uid(), date:viewingDate, meal:activeFoodMealId, name:lastOffProduct.name,
+    kcal: Math.round(lastOffProduct.per100.kcal*f), protein: Math.round(lastOffProduct.per100.protein*f),
+    carbs: Math.round(lastOffProduct.per100.carbs*f), fat: Math.round(lastOffProduct.per100.fat*f)
+  };
+  state.nutrition.push(entry);
+  if(!saveState()){ state.nutrition.pop(); alert('Eintrag konnte nicht gespeichert werden — der lokale Speicher ist voll.'); return; }
+  closeFoodForm();
+  renderErnaehrung();
+});
+
+/* ============================================================
+   FOOD PHOTO + rough client-side AI macro guess (MobileNet, no key, no server)
+   Accuracy is limited — this is a starting estimate to review, not a precise reading.
+   ============================================================ */
+const FOOD_MACRO_GUESSES = [
+  [['pizza'], { kcal:285, protein:12, carbs:36, fat:10 }],
+  [['cheeseburger','hamburger'], { kcal:295, protein:17, carbs:24, fat:14 }],
+  [['hotdog','hot dog'], { kcal:290, protein:10, carbs:22, fat:18 }],
+  [['ice cream','icecream'], { kcal:207, protein:4, carbs:24, fat:11 }],
+  [['pretzel'], { kcal:340, protein:9, carbs:72, fat:3 }],
+  [['bagel'], { kcal:245, protein:10, carbs:48, fat:1.5 }],
+  [['burrito'], { kcal:326, protein:14, carbs:40, fat:12 }],
+  [['french loaf','bread'], { kcal:265, protein:9, carbs:49, fat:3 }],
+  [['meatloaf'], { kcal:230, protein:19, carbs:8, fat:14 }],
+  [['pancake'], { kcal:227, protein:6, carbs:28, fat:10 }],
+  [['waffle'], { kcal:291, protein:7, carbs:33, fat:14 }],
+  [['guacamole'], { kcal:150, protein:2, carbs:9, fat:13 }],
+  [['salad'], { kcal:150, protein:5, carbs:12, fat:9 }],
+  [['spaghetti','carbonara'], { kcal:370, protein:14, carbs:52, fat:11 }],
+  [['sushi'], { kcal:200, protein:9, carbs:38, fat:1 }],
+  [['taco'], { kcal:210, protein:9, carbs:21, fat:10 }],
+  [['pot pie'], { kcal:400, protein:12, carbs:35, fat:24 }],
+  [['trifle'], { kcal:220, protein:3, carbs:33, fat:9 }],
+  [['chocolate sauce','chocolate'], { kcal:250, protein:3, carbs:35, fat:11 }],
+  [['orange'], { kcal:47, protein:1, carbs:12, fat:0 }],
+  [['banana'], { kcal:89, protein:1, carbs:23, fat:0 }],
+];
+function guessMacrosForLabel(label){
+  const l = label.toLowerCase();
+  for(const [keywords, macros] of FOOD_MACRO_GUESSES){
+    if(keywords.some(k=>l.includes(k))) return macros;
+  }
+  return null;
+}
+let mobilenetModel = null;
+let mobilenetLoading = null;
+function classifierAvailable(){ return typeof mobilenet !== 'undefined' && typeof tf !== 'undefined'; }
+async function getMobilenetModel(){
+  if(mobilenetModel) return mobilenetModel;
+  if(!mobilenetLoading) mobilenetLoading = mobilenet.load();
+  mobilenetModel = await mobilenetLoading;
+  return mobilenetModel;
+}
+function resetFoodPhotoUI(){
+  currentFoodPhoto = null;
+  document.getElementById('foodPhotoPreviewWrap').style.display = 'none';
+  document.getElementById('foodClassifyResult').style.display = 'none';
+  document.getElementById('foodClassifyStatus').textContent = '';
+}
+document.getElementById('foodPhotoBtn').addEventListener('click', ()=> document.getElementById('foodPhotoInput').click());
+document.getElementById('foodPhotoInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const dataUrl = await compressImage(file, 320, 0.6);
+    currentFoodPhoto = dataUrl;
+    document.getElementById('foodPhotoPreviewWrap').style.display = 'block';
+    const img = document.getElementById('foodPhotoPreview');
+    img.src = dataUrl;
+    document.getElementById('foodClassifyResult').style.display = 'none';
+    const statusEl = document.getElementById('foodClassifyStatus');
+    if(!classifierAvailable()){
+      statusEl.textContent = 'Foto gespeichert. Automatische Erkennung momentan nicht verfügbar (Netzwerk) — Werte bitte manuell eintragen.';
+      return;
+    }
+    statusEl.textContent = 'Analysiere Foto...';
+    img.onload = async ()=>{
+      try{
+        const model = await getMobilenetModel();
+        const predictions = await model.classify(img);
+        const top = predictions[0];
+        const guess = guessMacrosForLabel(top.className);
+        if(guess){
+          statusEl.textContent = '';
+          document.getElementById('foodClassifyResult').style.display = 'block';
+          document.getElementById('foodClassifyGuess').textContent = `Sieht aus wie: ${top.className.split(',')[0]} (${Math.round(top.probability*100)}%) — geschätzt ${guess.kcal} kcal`;
+          document.getElementById('foodClassifyApplyBtn').onclick = ()=>{
+            document.getElementById('foodNameInput').value = document.getElementById('foodNameInput').value || top.className.split(',')[0];
+            document.getElementById('foodKcalInput').value = guess.kcal;
+            document.getElementById('foodProteinInput').value = guess.protein;
+            document.getElementById('foodCarbsInput').value = guess.carbs;
+            document.getElementById('foodFatInput').value = guess.fat;
+          };
+        } else {
+          statusEl.textContent = `Sieht aus wie: ${top.className.split(',')[0]} — dafür hab ich noch keine Nährwert-Schätzung. Bitte manuell eintragen.`;
+        }
+      }catch(err){
+        console.error('Klassifizierung fehlgeschlagen', err);
+        statusEl.textContent = 'Automatische Erkennung fehlgeschlagen. Werte bitte manuell eintragen.';
+      }
+    };
+  }catch(err){
+    console.error('Foto-Verarbeitung fehlgeschlagen', err);
+    alert('Foto konnte nicht verarbeitet werden.');
+  }
+  e.target.value = '';
+});
+document.getElementById('foodPhotoRemoveBtn').addEventListener('click', resetFoodPhotoUI);
 
 /* ---------------- init ---------------- */
 renderHome();
