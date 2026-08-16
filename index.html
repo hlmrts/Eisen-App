@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js" defer></script>
 
 <style>
   :root{
@@ -61,6 +61,12 @@
   header.top .brand{ font-family:'Big Shoulders Display', sans-serif; font-weight:800; font-size:26px; letter-spacing:0.06em; display:flex; align-items:center; gap:8px; }
   header.top .brand .dot{ width:8px; height:8px; border-radius:50%; background:linear-gradient(135deg,var(--ember),var(--teal)); }
   header.top .date{ font-size:12.5px; color:var(--text-dim); text-transform:capitalize; }
+  .day-nav{ display:flex; align-items:center; gap:4px; }
+  .day-nav button{ background:none; border:none; color:var(--text-faint); padding:4px; display:flex; }
+  .day-nav button svg{ width:16px; height:16px; }
+  .day-nav button:disabled{ opacity:0.25; }
+  .day-nav button:not(:disabled):active{ color:var(--text); }
+  .today-jump{ display:block; margin:0 auto 14px; background:none; border:1px solid var(--border); color:var(--teal); font-size:12px; font-weight:600; padding:6px 14px; border-radius:20px; }
 
   main{ flex:1; padding: 4px 18px 104px 18px; }
   .view{ display:none; animation: fade .25s ease; }
@@ -83,6 +89,7 @@
   .gauge-legend span{ font-size:10.5px; color:var(--text-faint); display:flex; align-items:center; gap:5px; }
   .gauge-legend i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
   .gauge-sub{ font-size:12.5px; color:var(--text-faint); margin-top:12px; text-align:center; max-width:280px; }
+  .quote-line{ margin-top:16px; padding-top:14px; border-top:1px solid var(--border); font-family:var(--font-voice, 'Inter'), serif; font-style:italic; font-size:13px; color:var(--text-dim); text-align:center; max-width:290px; line-height:1.5; }
 
   .tile-val{ font-size:26px; font-weight:700; }
   .tile-unit{ font-size:12px; color:var(--text-dim); margin-left:3px; font-weight:500;}
@@ -160,7 +167,15 @@
 
   <header class="top">
     <div class="brand"><span class="dot"></span>EISEN</div>
-    <div class="date" id="todayLabel"></div>
+    <div class="day-nav">
+      <button type="button" id="prevDayBtn" aria-label="Vorheriger Tag">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="date" id="todayLabel"></div>
+      <button type="button" id="nextDayBtn" aria-label="Nächster Tag">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
   </header>
 
   <main>
@@ -181,6 +196,7 @@
             <span><i style="background:var(--coral)"></i>Belastung</span>
           </div>
           <div class="gauge-sub" id="recoverySub">Trag unten deinen Schlaf und Zustand ein, um deinen heutigen Wert zu berechnen.</div>
+          <div class="quote-line" id="quoteLine"></div>
         </div>
       </div>
 
@@ -197,7 +213,14 @@
         </div>
       </div>
 
-      <div class="card">
+      <button type="button" class="today-jump" id="todayJumpBtn" style="display:none;">Zurück zu heute</button>
+
+      <div class="card" id="pastDayRecap" style="display:none;">
+        <h2>Eintrag an diesem Tag</h2>
+        <div id="pastDayContent"></div>
+      </div>
+
+      <div class="card" id="checkinCard">
         <h2>Check-in</h2>
         <form id="checkinForm">
           <label class="field">
@@ -231,7 +254,7 @@
         </form>
       </div>
 
-      <div class="card">
+      <div class="card" id="behaviorsCard">
         <h2>Behaviors heute</h2>
         <div class="chip-grid" id="quickTags"></div>
         <button class="btn small" id="quickJournalSave" style="width:100%;">Speichern</button>
@@ -420,28 +443,97 @@ const todayStr = () => new Date().toISOString().slice(0,10);
 const fmtDate = (iso) => new Date(iso+'T00:00:00').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' });
 const daysAgo = (n) => new Date(Date.now()-n*864e5).toISOString().slice(0,10);
 
-/* ---------------- Chart.js theme ---------------- */
-Chart.defaults.color = '#8A9099';
-Chart.defaults.font.family = "'JetBrains Mono', monospace";
-Chart.defaults.font.size = 10;
-Chart.defaults.borderColor = '#2A2E35';
+/* ---------------- Chart.js theme (guarded — a blocked/slow CDN must never break the app) ---------------- */
+const chartsAvailable = () => typeof Chart !== 'undefined';
+function setupChartDefaults(){
+  if(!chartsAvailable()) return;
+  Chart.defaults.color = '#8A9099';
+  Chart.defaults.font.family = "'JetBrains Mono', monospace";
+  Chart.defaults.font.size = 10;
+  Chart.defaults.borderColor = '#2A2E35';
+}
+setupChartDefaults();
 
 /* ---------------- navigation ---------------- */
 document.querySelectorAll('nav.tabbar button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('view-'+btn.dataset.view).classList.add('active');
-    if(btn.dataset.view==='trends') renderTrends();
-    if(btn.dataset.view==='ernaehrung') renderErnaehrung();
-    if(btn.dataset.view==='training') renderTraining();
-    if(btn.dataset.view==='journal') renderJournalView();
+    try{
+      document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('view-'+btn.dataset.view).classList.add('active');
+      if(btn.dataset.view==='trends') renderTrends();
+      if(btn.dataset.view==='ernaehrung') renderErnaehrung();
+      if(btn.dataset.view==='training') renderTraining();
+      if(btn.dataset.view==='journal') renderJournalView();
+    }catch(e){ console.error('Tab-Wechsel fehlgeschlagen', e); }
   });
 });
 
-document.getElementById('todayLabel').textContent =
-  new Date().toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' });
+/* ---------------- day navigator (Home) ---------------- */
+let viewingDate = todayStr();
+function updateDateLabel(){
+  const isToday = viewingDate === todayStr();
+  const d = new Date(viewingDate+'T00:00:00');
+  document.getElementById('todayLabel').textContent = isToday
+    ? d.toLocaleDateString('de-DE', { weekday:'long', day:'numeric', month:'long' })
+    : d.toLocaleDateString('de-DE', { weekday:'short', day:'numeric', month:'long' });
+  document.getElementById('nextDayBtn').disabled = isToday;
+  document.getElementById('todayJumpBtn').style.display = isToday ? 'none' : 'block';
+}
+document.getElementById('prevDayBtn').addEventListener('click', ()=>{
+  const d = new Date(viewingDate+'T00:00:00'); d.setDate(d.getDate()-1);
+  viewingDate = d.toISOString().slice(0,10);
+  updateDateLabel(); renderHome();
+});
+document.getElementById('nextDayBtn').addEventListener('click', ()=>{
+  if(viewingDate===todayStr()) return;
+  const d = new Date(viewingDate+'T00:00:00'); d.setDate(d.getDate()+1);
+  viewingDate = d.toISOString().slice(0,10);
+  updateDateLabel(); renderHome();
+});
+document.getElementById('todayJumpBtn').addEventListener('click', ()=>{
+  viewingDate = todayStr();
+  updateDateLabel(); renderHome();
+});
+updateDateLabel();
+
+/* ---------------- daily motivational quote ---------------- */
+const QUOTES = [
+  "Konstanz schlägt Motivation.",
+  "Der Satz, den du heute nicht machst, zählt morgen nicht mehr mit.",
+  "Fortschritt ist leise. Zeig einfach wieder auf.",
+  "Eisen vergisst nicht, wer wirklich trainiert hat.",
+  "4×12 ist kein Ziel, es ist ein Versprechen an dich selbst.",
+  "Erholung ist Training – nur ohne Gewicht.",
+  "Kleine Wiederholung, große Wirkung.",
+  "Disziplin ist das, was übrig bleibt, wenn die Lust verschwindet.",
+  "Du musst nicht motiviert sein. Du musst nur anfangen.",
+  "Jeder Rekord war einmal nur ein weiterer Satz.",
+  "Form vor Ego, jeden einzelnen Tag.",
+  "Was du heute wiederholst, wirst du morgen können.",
+  "Ruhe ist kein Rückschritt, sie ist Teil des Plans.",
+  "Der Körper folgt, wo die Gewohnheit führt.",
+  "Nicht jeder Tag muss perfekt sein – er muss nur stattfinden.",
+  "Stärke ist ein Nebenprodukt der Wiederholung.",
+  "Zeig auf. Der Rest ergibt sich.",
+  "Dein einziger Konkurrent ist dein letztes Protokoll.",
+  "Schwere Tage bauen die Basis für leichte.",
+  "Ein Satz mehr, als du wolltest – das ist Wachstum.",
+  "Was gemessen wird, wird gemanagt.",
+  "Der Ruhepuls lügt nicht – hör auf deinen Körper.",
+  "Heute zählt, nicht die perfekte Woche.",
+  "Kleine Fortschritte sind immer noch Fortschritte."
+];
+function seededIndex(dateStr, length){
+  let h = 0;
+  for(let i=0;i<dateStr.length;i++){ h = (h*31 + dateStr.charCodeAt(i)) >>> 0; }
+  return h % length;
+}
+function renderQuote(){
+  const q = QUOTES[seededIndex(todayStr(), QUOTES.length)];
+  document.getElementById('quoteLine').textContent = '„' + q + '"';
+}
 
 /* ---------------- dual gauge (SVG dial) ---------------- */
 const START_DEG = -220, END_DEG = 40;
@@ -612,36 +704,84 @@ document.getElementById('saveJournalBtn').addEventListener('click', ()=>{
 });
 
 function renderHome(){
-  const today = todayStr();
-  const c = state.checkins.find(c=>c.date===today);
+ try{
+  const vd = viewingDate;
+  const isToday = vd === todayStr();
+  const c = state.checkins.find(c=>c.date===vd);
   const recovery = c ? c.recovery : null;
-  const strain = computeStrainForDate(today);
+  const strain = computeStrainForDate(vd);
 
   drawGauge(recovery, strain);
   document.getElementById('recoveryNum').textContent = recovery===null ? '–' : recovery;
   document.getElementById('strainNum').textContent = strain===null ? '–' : strain;
   document.getElementById('recoverySub').textContent = recoverySubtext(recovery, strain);
   document.getElementById('sleepTile').innerHTML = (c? c.sleepHours : '–') + '<span class="tile-unit">h</span>';
-  document.getElementById('sleepSub').textContent = c && c.usedPhysio ? 'inkl. Ruhepuls/HRV' : 'letzte Nacht';
+  document.getElementById('sleepSub').textContent = c && c.usedPhysio ? 'inkl. Ruhepuls/HRV' : (isToday ? 'letzte Nacht' : fmtDate(vd));
 
   const range = strainTargetRange(recovery);
   document.getElementById('targetTile').textContent = range ? `${range[0]}–${range[1]}` : '–';
-  document.getElementById('targetSub').textContent = range ? 'empfohlener Bereich heute' : 'Check-in ausstehend';
+  document.getElementById('targetSub').textContent = range ? (isToday?'empfohlener Bereich heute':'Bereich an diesem Tag') : 'Check-in ausstehend';
 
-  if(c){
-    document.getElementById('sleepHours').value = c.sleepHours;
-    document.getElementById('sleepQual').value = c.sleepQual;
-    document.getElementById('soreness').value = c.soreness;
-    document.getElementById('mood').value = c.mood;
-    document.getElementById('restingHR').value = c.restingHR || '';
-    document.getElementById('hrv').value = c.hrv || '';
-    document.getElementById('sleepHoursVal').textContent = sliderLabels.sleepHours(c.sleepHours);
-    document.getElementById('sleepQualVal').textContent = sliderLabels.sleepQual(c.sleepQual);
-    document.getElementById('sorenessVal').textContent = sliderLabels.soreness(c.soreness);
-    document.getElementById('moodVal').textContent = sliderLabels.mood(c.mood);
+  renderQuote();
+
+  if(isToday){
+    document.getElementById('checkinCard').style.display = 'block';
+    document.getElementById('behaviorsCard').style.display = 'block';
+    document.getElementById('pastDayRecap').style.display = 'none';
+    if(c){
+      document.getElementById('sleepHours').value = c.sleepHours;
+      document.getElementById('sleepQual').value = c.sleepQual;
+      document.getElementById('soreness').value = c.soreness;
+      document.getElementById('mood').value = c.mood;
+      document.getElementById('restingHR').value = c.restingHR || '';
+      document.getElementById('hrv').value = c.hrv || '';
+      document.getElementById('sleepHoursVal').textContent = sliderLabels.sleepHours(c.sleepHours);
+      document.getElementById('sleepQualVal').textContent = sliderLabels.sleepQual(c.sleepQual);
+      document.getElementById('sorenessVal').textContent = sliderLabels.soreness(c.soreness);
+      document.getElementById('moodVal').textContent = sliderLabels.mood(c.mood);
+    }
+    loadTodaysTags();
+    renderTagChips('quickTags');
+  } else {
+    document.getElementById('checkinCard').style.display = 'none';
+    document.getElementById('behaviorsCard').style.display = 'none';
+    document.getElementById('pastDayRecap').style.display = 'block';
+    renderPastDayRecap(vd, c);
   }
-  loadTodaysTags();
-  renderTagChips('quickTags');
+ }catch(e){ console.error('renderHome failed', e); }
+}
+
+function renderPastDayRecap(date, c){
+  const el = document.getElementById('pastDayContent');
+  const j = state.journal.find(j=>j.date===date);
+  const workouts = state.workouts.filter(w=>w.date===date);
+  const proteinTotal = state.protein.filter(p=>p.date===date).reduce((s,p)=>s+p.grams,0);
+  const bw = state.bodyweights.find(b=>b.date===date);
+
+  if(!c && !j && workouts.length===0 && proteinTotal===0 && !bw){
+    el.innerHTML = '<div class="empty">Keine Daten für diesen Tag.</div>';
+    return;
+  }
+
+  let html = '';
+  if(c){
+    html += `<div class="hist-item"><div class="l">Schlaf</div><div class="r">${c.sleepHours} h · Qualität ${c.sleepQual}/5</div></div>`;
+    html += `<div class="hist-item"><div class="l">Muskelkater / Stimmung</div><div class="r">${c.soreness}/5 · ${c.mood}/5</div></div>`;
+    if(c.restingHR || c.hrv) html += `<div class="hist-item"><div class="l">Ruhepuls / HRV</div><div class="r">${c.restingHR||'–'} bpm · ${c.hrv||'–'} ms</div></div>`;
+  }
+  if(workouts.length){
+    workouts.forEach(w=>{
+      let vol=0, sets=0;
+      Object.values(w.exercises).forEach(s=>s.forEach(x=>{ vol+=x.reps*x.weight; sets++; }));
+      html += `<div class="hist-item"><div class="l">Training Ganzkörper ${w.split}</div><div class="r">${sets} Sätze · ${Math.round(vol)} kg</div></div>`;
+    });
+  }
+  if(proteinTotal>0) html += `<div class="hist-item"><div class="l">Protein</div><div class="r">${Math.round(proteinTotal)} g</div></div>`;
+  if(bw) html += `<div class="hist-item"><div class="l">Körpergewicht</div><div class="r">${bw.kg} kg</div></div>`;
+  if(j && j.tags.length) html += `<div class="hist-item"><div class="l">Behaviors</div><div class="r" style="text-align:right;">${j.tags.join(', ')}</div></div>`;
+  if(j && j.note) html += `<div class="hist-item"><div class="l">Notiz</div><div class="r" style="text-align:right; font-weight:400; max-width:200px;">${j.note.replace(/</g,'&lt;')}</div></div>`;
+
+  el.innerHTML = html || '<div class="empty">Keine Daten für diesen Tag.</div>';
 }
 
 /* ---------------- training ---------------- */
@@ -743,24 +883,29 @@ function baseLineOptions(){
   };
 }
 function renderTrends(){
+ try{
   const days30 = []; for(let i=29;i>=0;i--) days30.push(daysAgo(i));
-  const recoveryData = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c?c.recovery:null; });
-  destroyChart('recovery');
-  charts.recovery = new Chart(document.getElementById('chartRecovery'), {
-    type:'line',
-    data:{ labels:days30.map(fmtDate), datasets:[{ data:recoveryData, borderColor:'#5EC8A8', backgroundColor:'rgba(94,200,168,0.12)', fill:true, spanGaps:true }]},
-    options: baseLineOptions()
-  });
+
+  if(chartsAvailable()){
+    setupChartDefaults();
+    const recoveryData = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c?c.recovery:null; });
+    destroyChart('recovery');
+    charts.recovery = new Chart(document.getElementById('chartRecovery'), {
+      type:'line',
+      data:{ labels:days30.map(fmtDate), datasets:[{ data:recoveryData, borderColor:'#5EC8A8', backgroundColor:'rgba(94,200,168,0.12)', fill:true, spanGaps:true }]},
+      options: baseLineOptions()
+    });
+  }
 
   const rhrVals = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c&&c.restingHR?c.restingHR:null; });
   const hrvVals = days30.map(d=>{ const c=state.checkins.find(c=>c.date===d); return c&&c.hrv?c.hrv:null; });
   const hasPhysio = rhrVals.some(v=>v!=null) || hrvVals.some(v=>v!=null);
-  document.getElementById('rhrChartWrap').style.display = hasPhysio ? 'block' : 'none';
-  document.getElementById('rhrEmpty').style.display = hasPhysio ? 'none' : 'block';
+  document.getElementById('rhrChartWrap').style.display = (hasPhysio && chartsAvailable()) ? 'block' : 'none';
+  document.getElementById('rhrEmpty').style.display = (hasPhysio && chartsAvailable()) ? 'none' : 'block';
   const rhrBase = rollingBaseline('restingHR');
   const hrvBase = rollingBaseline('hrv');
   document.getElementById('baselineHint').textContent = (rhrBase && hrvBase) ? `Basis: ${Math.round(rhrBase)} bpm / ${Math.round(hrvBase)} ms` : '';
-  if(hasPhysio){
+  if(hasPhysio && chartsAvailable()){
     destroyChart('rhr');
     charts.rhr = new Chart(document.getElementById('chartRhr'), {
       type:'line',
@@ -783,20 +928,27 @@ function renderTrends(){
     state.workouts.forEach(w=>{ if(w.date>=start && w.date<=end) Object.values(w.exercises).forEach(sets=>sets.forEach(s=>{ if(s.reps&&s.weight) vol+=s.reps*s.weight; })); });
     weeks.push({ label:fmtDate(start), vol:Math.round(vol) });
   }
-  destroyChart('volume');
-  charts.volume = new Chart(document.getElementById('chartVolume'), {
-    type:'bar',
-    data:{ labels:weeks.map(w=>w.label), datasets:[{ data:weeks.map(w=>w.vol), backgroundColor:'#7C8CE8', borderRadius:4 }]},
-    options: { ...baseLineOptions() }
-  });
+  if(chartsAvailable()){
+    destroyChart('volume');
+    charts.volume = new Chart(document.getElementById('chartVolume'), {
+      type:'bar',
+      data:{ labels:weeks.map(w=>w.label), datasets:[{ data:weeks.map(w=>w.vol), backgroundColor:'#7C8CE8', borderRadius:4 }]},
+      options: { ...baseLineOptions() }
+    });
 
-  const bw = [...state.bodyweights].sort((a,b)=>a.date.localeCompare(b.date)).slice(-30);
-  destroyChart('weight');
-  charts.weight = new Chart(document.getElementById('chartWeight'), {
-    type:'line',
-    data:{ labels:bw.map(b=>fmtDate(b.date)), datasets:[{ data:bw.map(b=>b.kg), borderColor:'#E8873C', backgroundColor:'rgba(232,135,60,0.1)', fill:true }]},
-    options: baseLineOptions()
-  });
+    const bw = [...state.bodyweights].sort((a,b)=>a.date.localeCompare(b.date)).slice(-30);
+    destroyChart('weight');
+    charts.weight = new Chart(document.getElementById('chartWeight'), {
+      type:'line',
+      data:{ labels:bw.map(b=>fmtDate(b.date)), datasets:[{ data:bw.map(b=>b.kg), borderColor:'#E8873C', backgroundColor:'rgba(232,135,60,0.1)', fill:true }]},
+      options: baseLineOptions()
+    });
+  } else {
+    ['chartRecovery','chartVolume','chartWeight'].forEach(id=>{
+      const c = document.getElementById(id);
+      if(c && c.parentElement) c.parentElement.innerHTML = '<div class="empty">Diagramm momentan nicht verfügbar (Netzwerk).</div>';
+    });
+  }
 
   const histEl = document.getElementById('workoutHistory');
   const sorted = [...state.workouts].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10);
@@ -810,6 +962,7 @@ function renderTrends(){
   }
 
   renderJournalInsights();
+ }catch(e){ console.error('renderTrends failed', e); }
 }
 document.getElementById('saveWeightBtn').addEventListener('click', ()=>{
   const val = parseFloat(document.getElementById('weightInput').value);
@@ -850,6 +1003,7 @@ function renderJournalInsights(){
 function proteinTargetRange(){ const kg = state.settings.bodyweightKg || 85; return [Math.round(kg*1.8), Math.round(kg*2.2)]; }
 function proteinToday(){ const date = todayStr(); return state.protein.filter(p=>p.date===date).reduce((s,p)=>s+p.grams,0); }
 function renderErnaehrung(){
+ try{
   const total = proteinToday();
   const [lo,hi] = proteinTargetRange();
   document.getElementById('proteinTile').innerHTML = Math.round(total) + '<span class="tile-unit">g</span>';
@@ -858,12 +1012,19 @@ function renderErnaehrung(){
 
   const days14 = []; for(let i=13;i>=0;i--) days14.push(daysAgo(i));
   const totals = days14.map(d=>state.protein.filter(p=>p.date===d).reduce((s,p)=>s+p.grams,0));
-  destroyChart('protein');
-  charts.protein = new Chart(document.getElementById('chartProtein'), {
-    type:'bar',
-    data:{ labels:days14.map(fmtDate), datasets:[{ data:totals.map(Math.round), backgroundColor: totals.map(t=>t>=lo?'#5EC8A8':'#2A2E35'), borderRadius:4 }]},
-    options: baseLineOptions()
-  });
+  if(chartsAvailable()){
+    setupChartDefaults();
+    destroyChart('protein');
+    charts.protein = new Chart(document.getElementById('chartProtein'), {
+      type:'bar',
+      data:{ labels:days14.map(fmtDate), datasets:[{ data:totals.map(Math.round), backgroundColor: totals.map(t=>t>=lo?'#5EC8A8':'#2A2E35'), borderRadius:4 }]},
+      options: baseLineOptions()
+    });
+  } else {
+    const c = document.getElementById('chartProtein');
+    if(c && c.parentElement) c.parentElement.innerHTML = '<div class="empty">Diagramm momentan nicht verfügbar (Netzwerk).</div>';
+  }
+ }catch(e){ console.error('renderErnaehrung failed', e); }
 }
 document.getElementById('addProteinBtn').addEventListener('click', ()=>{
   const val = parseFloat(document.getElementById('proteinInput').value);
